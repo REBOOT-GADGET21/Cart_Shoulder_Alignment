@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="cart_base" params="prefix">
+    <link name="${prefix}base_link">
+      <visual>
+        <geometry>
+          <box size="1.2 0.6 0.2"/>
+        </geometry>
+        <material name="platform_blue">
+          <color rgba="0.08 0.35 0.95 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <box size="1.2 0.6 0.2"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="10.0"/>
+        <inertia ixx="1.0" iyy="1.0" izz="1.0"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+</robot>

@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="wheel" params="prefix suffix">
+    <link name="${prefix}${suffix}">
+      <visual>
+        <geometry>
+          <cylinder length="0.10" radius="0.2"/>
+        </geometry>
+        <material name="wheel_black">
+          <color rgba="0.08 0.08 0.08 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder length="0.10" radius="0.2"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="1.0"/>
+        <inertia ixx="0.1" iyy="0.1" izz="0.1"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+</robot>

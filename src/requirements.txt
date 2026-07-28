@@ -1,0 +1,14 @@
+Ubuntu 버전: Ubuntu 22.04.5 LTS
+ROS 2버전: Humble 
+Python 버전: python 3.10.20
+
+Gazebo 버전: Gazebo Sim, version 8.14.0
+    Copyright (C) 2018 Open Source Robotics Foundation.
+    Released under the Apache 2.0 License.
+
+RealSense SDK 설치 여부: 2.55.1
+MediaPipe 설치: 0.10.14로 설치 되어있음
+colcon 빌드 확인: 설치 되어있지 않음
+
+pip install "pytest<8.0.0" "pluggy<1.4.0" jinja2 typeguard pyyaml catkin_pkg rosdistro empy numpy lark
+rosdep update
