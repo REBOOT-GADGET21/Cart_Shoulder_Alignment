@@ -1,3 +1,7 @@
+"""
+카트만 띄우는 시뮬레이션 코드/ 움직임을 테스트 할 수 없음
+"""
+
 import os
 from pathlib import Path
 

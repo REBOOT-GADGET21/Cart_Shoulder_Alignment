@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 
 from geometry.vector_math import wrap_angle_radians
+# 센서 데이터 처리 시 rad이나 도 값이 발생했을 때 [-pi, pi] 또는 [0, 2\pi]로 변환해주는 작업
 
 from .target_pose import TargetPose2D
 

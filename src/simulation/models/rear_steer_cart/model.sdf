@@ -36,22 +36,24 @@
       <visual name="right_motor_mount"><pose>0 0 0.10 0 0 0</pose><geometry><box><size>0.16 0.12 0.20</size></box></geometry><material><diffuse>0.45 0.45 0.45 1</diffuse></material></visual>
     </link>
     <link name="rear_left_wheel">
-      <pose relative_to="rear_left_steering_link">0 0 0 1.5708 0 0</pose>
+      <pose relative_to="rear_left_steering_link">0 0 0 0 0 0</pose>
       <inertial><mass>1</mass><inertia><ixx>0.005</ixx><iyy>0.005</iyy><izz>0.005</izz></inertia></inertial>
       <visual name="rear_left_visual">
+        <pose>0 0 0 1.5708 0 0</pose>
         <geometry><cylinder><radius>0.2</radius><length>0.10</length></cylinder></geometry>
         <material><ambient>0.04 0.04 0.04 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material>
       </visual>
-      <collision name="rear_left_collision"><geometry><cylinder><radius>0.2</radius><length>0.10</length></cylinder></geometry></collision>
+      <collision name="rear_left_collision"><pose>0 0 0 1.5708 0 0</pose><geometry><cylinder><radius>0.2</radius><length>0.10</length></cylinder></geometry></collision>
     </link>
     <link name="rear_right_wheel">
-      <pose relative_to="rear_right_steering_link">0 0 0 1.5708 0 0</pose>
+      <pose relative_to="rear_right_steering_link">0 0 0 0 0 0</pose>
       <inertial><mass>1</mass><inertia><ixx>0.005</ixx><iyy>0.005</iyy><izz>0.005</izz></inertia></inertial>
       <visual name="rear_right_visual">
+        <pose>0 0 0 1.5708 0 0</pose>
         <geometry><cylinder><radius>0.2</radius><length>0.10</length></cylinder></geometry>
         <material><ambient>0.04 0.04 0.04 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material>
       </visual>
-      <collision name="rear_right_collision"><geometry><cylinder><radius>0.2</radius><length>0.10</length></cylinder></geometry></collision>
+      <collision name="rear_right_collision"><pose>0 0 0 1.5708 0 0</pose><geometry><cylinder><radius>0.2</radius><length>0.10</length></cylinder></geometry></collision>
     </link>
 
     <!-- Matches params_setting.json: rear-centre mount, 0.60 m above base_link, 40 deg down. -->
@@ -59,11 +61,26 @@
     <link name="camera_optical_frame"/>
 
     <joint name="front_caster_joint" type="ball"><parent>base_link</parent><child>front_caster_link</child></joint>
-    <joint name="rear_left_steering_joint" type="revolute"><parent>base_link</parent><child>rear_left_steering_link</child><axis><xyz>0 0 1</xyz><limit><lower>-1.5708</lower><upper>1.5708</upper></limit></axis></joint>
-    <joint name="rear_right_steering_joint" type="revolute"><parent>base_link</parent><child>rear_right_steering_link</child><axis><xyz>0 0 1</xyz><limit><lower>-1.5708</lower><upper>1.5708</upper></limit></axis></joint>
-    <joint name="rear_left_wheel_joint" type="revolute"><parent>rear_left_steering_link</parent><child>rear_left_wheel</child><axis><xyz>0 1 0</xyz></axis></joint>
-    <joint name="rear_right_wheel_joint" type="revolute"><parent>rear_right_steering_link</parent><child>rear_right_wheel</child><axis><xyz>0 1 0</xyz></axis></joint>
+    <joint name="rear_left_steering_joint" type="revolute"><parent>base_link</parent><child>rear_left_steering_link</child><axis><xyz>0 0 1</xyz><limit><lower>-1.5708</lower><upper>1.5708</upper><effort>50</effort><velocity>1.5</velocity></limit><dynamics><damping>0.5</damping></dynamics></axis></joint>
+    <joint name="rear_right_steering_joint" type="revolute"><parent>base_link</parent><child>rear_right_steering_link</child><axis><xyz>0 0 1</xyz><limit><lower>-1.5708</lower><upper>1.5708</upper><effort>50</effort><velocity>1.5</velocity></limit><dynamics><damping>0.5</damping></dynamics></axis></joint>
+    <!-- DART does not support SDF continuous joints here; large revolute limits provide equivalent wheel rotation. -->
+    <joint name="rear_left_wheel_joint" type="revolute"><parent>rear_left_steering_link</parent><child>rear_left_wheel</child><axis><xyz>0 1 0</xyz><limit><lower>-1000000</lower><upper>1000000</upper><effort>50</effort><velocity>20</velocity></limit><dynamics><damping>0.05</damping></dynamics></axis></joint>
+    <joint name="rear_right_wheel_joint" type="revolute"><parent>rear_right_steering_link</parent><child>rear_right_wheel</child><axis><xyz>0 1 0</xyz><limit><lower>-1000000</lower><upper>1000000</upper><effort>50</effort><velocity>20</velocity></limit><dynamics><damping>0.05</damping></dynamics></axis></joint>
     <joint name="camera_joint" type="fixed"><parent>base_link</parent><child>camera_link</child></joint>
     <joint name="camera_optical_joint" type="fixed"><parent>camera_link</parent><child>camera_optical_frame</child></joint>
+
+    <!-- ROS Float64 topics are bridged to these Gazebo Double topics. -->
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>rear_left_steering_joint</joint_name><topic>/rear_left_steering_cmd</topic><p_gain>8.0</p_gain><d_gain>0.5</d_gain><cmd_max>50</cmd_max><cmd_min>-50</cmd_min>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>rear_right_steering_joint</joint_name><topic>/rear_right_steering_cmd</topic><p_gain>8.0</p_gain><d_gain>0.5</d_gain><cmd_max>50</cmd_max><cmd_min>-50</cmd_min>
+    </plugin>
+    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+      <joint_name>rear_left_wheel_joint</joint_name><topic>/rear_left_wheel_speed_cmd</topic><use_force_commands>false</use_force_commands>
+    </plugin>
+    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+      <joint_name>rear_right_wheel_joint</joint_name><topic>/rear_right_wheel_speed_cmd</topic><use_force_commands>false</use_force_commands>
+    </plugin>
   </model>
 </sdf>
