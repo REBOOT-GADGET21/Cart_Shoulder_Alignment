@@ -12,13 +12,16 @@ def _resolve_config_path(config_path: str | None = None) -> Path:
     """Resolve a config path robustly from the workspace root or a provided path."""
 
     if config_path is None:
-        workspace_root = Path(__file__).resolve().parents[3]
-        return workspace_root / "params_setting.json"
+        workspace_path = Path.cwd() / "src" / "params_setting.json"
+        if workspace_path.exists():
+            return workspace_path
+        from ament_index_python.packages import get_package_share_directory
+
+        return Path(get_package_share_directory("rear_ackermann_controller")) / "config" / "params_setting.json"
 
     config_file = Path(config_path).expanduser()
     if not config_file.is_absolute():
-        workspace_root = Path(__file__).resolve().parents[3]
-        config_file = workspace_root / config_file
+        config_file = Path.cwd() / config_file
 
     return config_file
 

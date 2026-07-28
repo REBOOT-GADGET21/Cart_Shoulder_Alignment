@@ -24,7 +24,16 @@ class AlignmentSettings:
 def load_alignment_settings(config_path: str | None = None) -> AlignmentSettings:
     """Load shared settings; all camera offsets are measured from base_link."""
 
-    path = Path(config_path) if config_path else Path(__file__).resolve().parents[3] / "params_setting.json"
+    if config_path:
+        path = Path(config_path)
+    else:
+        workspace_path = Path.cwd() / "src" / "params_setting.json"
+        if workspace_path.exists():
+            path = workspace_path
+        else:
+            from ament_index_python.packages import get_package_share_directory
+
+            path = Path(get_package_share_directory("alignment")) / "config" / "params_setting.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
     return AlignmentSettings(
         camera_extrinsics=CameraExtrinsics(

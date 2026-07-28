@@ -1,4 +1,4 @@
-"""Publish two known shoulder points for the Phase 6 ROS wiring test."""
+"""Publish four known D435 optical-frame landmarks for alignment testing."""
 
 from __future__ import annotations
 
@@ -12,17 +12,20 @@ class FakeShoulderPublisher(Node):
 
     def __init__(self) -> None:
         super().__init__("fake_shoulder_publisher")
-        self.publisher = self.create_publisher(PoseArray, "/fake_shoulders", 10)
+        self.publisher = self.create_publisher(PoseArray, "/fake_body_landmarks_optical", 10)
         self.timer = self.create_timer(0.5, self.publish_shoulders)
 
     def publish_shoulders(self) -> None:
-        """Publish a line rotated about 26.6 degrees from the cart x axis."""
+        """Publish shoulder/pelvis points in left-shoulder-first optical order."""
 
         message = PoseArray()
-        left, right = Pose(), Pose()
-        left.position.x, left.position.y = 0.0, 0.0
-        right.position.x, right.position.y = 1.0, 0.5
-        message.poses = [left, right]
+        message.header.frame_id = "camera_optical_frame"
+        left_shoulder, right_shoulder, left_pelvis, right_pelvis = Pose(), Pose(), Pose(), Pose()
+        left_shoulder.position.x, left_shoulder.position.y, left_shoulder.position.z = -0.25, 0.20, 1.60
+        right_shoulder.position.x, right_shoulder.position.y, right_shoulder.position.z = 0.25, 0.20, 1.60
+        left_pelvis.position.x, left_pelvis.position.y, left_pelvis.position.z = -0.22, 0.50, 1.60
+        right_pelvis.position.x, right_pelvis.position.y, right_pelvis.position.z = 0.22, 0.50, 1.60
+        message.poses = [left_shoulder, right_shoulder, left_pelvis, right_pelvis]
         self.publisher.publish(message)
 
 
