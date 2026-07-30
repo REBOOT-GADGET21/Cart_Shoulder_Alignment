@@ -11,7 +11,7 @@ from geometry.vector_math import Point3D
 
 def test_optical_point_conversion_uses_expected_ros_axes() -> None:
     settings = AlignmentSettings(
-        CameraExtrinsics(0.0, 0.0, 0.0), 0.30, 1.2, 0.26,
+        CameraExtrinsics(0.0, 0.0, 0.0), 0.30, 1.2, -0.5, 0.26,
         AlignmentControlParams(0.35, 0.8, 0.15, 0.3, 0.03, 0.035),
         0.035, 0.02, 0.03, 10,
     )
@@ -21,13 +21,15 @@ def test_optical_point_conversion_uses_expected_ros_axes() -> None:
 
     assert result.valid is True
     assert result.target is not None
-    assert result.target.x_m == pytest.approx(2.0)
+    # x/y are now the rear-axle pivot error, not a base_link-centre target.
+    assert result.target.x_m == pytest.approx(2.5)
+    assert result.target.y_m == pytest.approx(-1.4)
     assert result.target.yaw_rad == pytest.approx(math.pi / 2.0)
 
 
 def test_parallel_line_does_not_choose_a_pi_rotation() -> None:
     settings = AlignmentSettings(
-        CameraExtrinsics(0.0, 0.0, 0.0), 0.30, 1.2, 0.26,
+        CameraExtrinsics(0.0, 0.0, 0.0), 0.30, 1.2, -0.5, 0.26,
         AlignmentControlParams(0.35, 0.8, 0.15, 0.3, 0.03, 0.035),
         0.035, 0.02, 0.03, 10,
     )

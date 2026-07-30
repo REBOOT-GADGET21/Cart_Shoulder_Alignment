@@ -48,5 +48,6 @@ def compute_camera_alignment(landmarks: BodyLandmarksOptical, settings: Alignmen
     center = compute_shoulder_center(left_shoulder, right_shoulder)
     target = compute_front_alignment_target(
         center, body_line.yaw_rad, settings.body_length_m, settings.front_clearance_m,
+        settings.rear_axle_x_m,
     )
     return AlignmentPipelineResult(target, compute_final_alignment_command(target, settings.controller), True, body_line.source)

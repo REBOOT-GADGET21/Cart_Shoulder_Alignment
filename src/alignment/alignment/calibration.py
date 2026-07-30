@@ -18,6 +18,7 @@ class AlignmentSettings:
     camera_extrinsics: CameraExtrinsics
     front_clearance_m: float
     body_length_m: float
+    rear_axle_x_m: float
     shoulder_pelvis_parallel_tolerance_rad: float
     controller: AlignmentControlParams
     yaw_tolerance_rad: float
@@ -47,6 +48,7 @@ def load_alignment_settings(config_path: str | None = None) -> AlignmentSettings
         ),
         front_clearance_m=raw["alignment_front_clearance_m"],
         body_length_m=raw["body_length_m"],
+        rear_axle_x_m=raw["rear_axle_x_m"],
         shoulder_pelvis_parallel_tolerance_rad=raw["shoulder_pelvis_parallel_tolerance_rad"],
         controller=AlignmentControlParams(
             raw["alignment_position_kp"], raw["alignment_yaw_kp"],
