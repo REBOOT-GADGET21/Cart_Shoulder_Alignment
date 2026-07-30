@@ -8,6 +8,7 @@
 
   <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
   <exec_depend>geometry</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

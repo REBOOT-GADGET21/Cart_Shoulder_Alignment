@@ -11,6 +11,7 @@
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>alignment</exec_depend>
   <exec_depend>rear_ackermann_controller</exec_depend>
+  <exec_depend>shoulder_align_controller</exec_depend>
   <depend>robot_state_publisher</depend>
   <depend>xacro</depend>
 

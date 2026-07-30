@@ -8,6 +8,7 @@ from pathlib import Path
 
 import rclpy
 from geometry_msgs.msg import Pose, PoseArray
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 
 from geometry.frame_transform import transform_base_point_to_optical
@@ -45,13 +46,15 @@ def _load_fake_patient_landmarks() -> tuple[Point3D, Point3D, Point3D, Point3D]:
 
 
 class GazeboGroundTruthPublisher(Node):
-    """Make a fixed Gazebo patient appear through the cart-mounted camera."""
+    """Publish fake camera data and C++-controller test inputs from Gazebo truth."""
 
     def __init__(self) -> None:
         super().__init__("gazebo_ground_truth_publisher")
         self.settings = load_alignment_settings()
         self.publisher = self.create_publisher(PoseArray, "/fake_body_landmarks_optical", 10)
         self.cart_pose_publisher = self.create_publisher(Pose, "/gazebo_ground_truth/cart_pose", 10)
+        self.odom_publisher = self.create_publisher(Odometry, "/odom", 20)
+        self.shoulder_line_publisher = self.create_publisher(PoseArray, "/shoulder_line", 10)
         self.subscription = self.create_subscription(PoseArray, "/model/rear_steer_cart/pose", self.on_cart_pose, 10)
         self.cart_x_m = 0.0
         self.cart_y_m = 0.0
@@ -71,6 +74,17 @@ class GazeboGroundTruthPublisher(Node):
         self.cart_pose_publisher.publish(cart_pose)
         q = cart_pose.orientation
         self.cart_yaw_rad = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        # Gazebo's model pose is base_link (platform centre).  The C++ TRT node
+        # explicitly controls the physical rear-axle pivot instead.
+        odom = Odometry()
+        odom.header.stamp = self.get_clock().now().to_msg()
+        odom.header.frame_id = "odom"
+        odom.child_frame_id = "rear_axle_pivot"
+        odom.pose.pose.position.x = self.cart_x_m + self.settings.rear_axle_x_m * math.cos(self.cart_yaw_rad)
+        odom.pose.pose.position.y = self.cart_y_m + self.settings.rear_axle_x_m * math.sin(self.cart_yaw_rad)
+        odom.pose.pose.position.z = cart_pose.position.z
+        odom.pose.pose.orientation = q
+        self.odom_publisher.publish(odom)
 
     def publish_landmarks(self) -> None:
         """Transform the fixed patient landmarks into the current optical camera frame."""
@@ -86,6 +100,15 @@ class GazeboGroundTruthPublisher(Node):
             pose.position.x, pose.position.y, pose.position.z = point_optical.x_m, point_optical.y_m, point_optical.z_m
             message.poses.append(pose)
         self.publisher.publish(message)
+
+        shoulder_line = PoseArray()
+        shoulder_line.header.stamp = self.get_clock().now().to_msg()
+        shoulder_line.header.frame_id = "odom"
+        for point_world in self.patient_points_world[:2]:
+            pose = Pose()
+            pose.position.x, pose.position.y, pose.position.z = point_world.x_m, point_world.y_m, point_world.z_m
+            shoulder_line.poses.append(pose)
+        self.shoulder_line_publisher.publish(shoulder_line)
 
 
 def main(args: list[str] | None = None) -> None:
