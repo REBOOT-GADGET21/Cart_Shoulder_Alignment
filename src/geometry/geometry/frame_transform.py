@@ -45,3 +45,20 @@ def transform_optical_point_to_base(point_optical_m: Point3D, extrinsics: Camera
         base_y_m + extrinsics.translation_y_m,
         base_z_m + extrinsics.translation_z_m,
     )
+
+
+def transform_base_point_to_optical(point_base_m: Point3D, extrinsics: CameraExtrinsics) -> Point3D:
+    """Inverse of ``transform_optical_point_to_base`` for Gazebo fake perception."""
+
+    base_x_m = point_base_m.x_m - extrinsics.translation_x_m
+    base_y_m = point_base_m.y_m - extrinsics.translation_y_m
+    base_z_m = point_base_m.z_m - extrinsics.translation_z_m
+    roll, pitch, yaw = extrinsics.roll_rad, -extrinsics.pitch_down_rad, extrinsics.yaw_rad
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    # Transpose of Rz(yaw) * Ry(pitch) * Rx(roll).
+    camera_x_m = (cy * cp) * base_x_m + (sy * cp) * base_y_m - sp * base_z_m
+    camera_y_m = (cy * sp * sr - sy * cr) * base_x_m + (sy * sp * sr + cy * cr) * base_y_m + cp * sr * base_z_m
+    camera_z_m = (cy * sp * cr + sy * sr) * base_x_m + (sy * sp * cr - cy * sr) * base_y_m + cp * cr * base_z_m
+    return Point3D(-camera_y_m, -camera_z_m, camera_x_m)

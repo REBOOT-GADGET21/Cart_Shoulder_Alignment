@@ -11,8 +11,9 @@ from geometry.vector_math import Point3D
 
 def test_optical_point_conversion_uses_expected_ros_axes() -> None:
     settings = AlignmentSettings(
-        CameraExtrinsics(0.0, 0.0, 0.0), 0.0, 0.26,
+        CameraExtrinsics(0.0, 0.0, 0.0), 0.30, 1.2, 0.26,
         AlignmentControlParams(0.35, 0.8, 0.15, 0.3, 0.03, 0.035),
+        0.035, 0.02, 0.03, 10,
     )
     result = compute_camera_alignment(
         BodyLandmarksOptical(Point3D(0.0, 0.0, 1.5), Point3D(0.0, 0.0, 2.5)), settings
@@ -21,13 +22,14 @@ def test_optical_point_conversion_uses_expected_ros_axes() -> None:
     assert result.valid is True
     assert result.target is not None
     assert result.target.x_m == pytest.approx(2.0)
-    assert result.target.yaw_rad == pytest.approx(0.0)
+    assert result.target.yaw_rad == pytest.approx(math.pi / 2.0)
 
 
 def test_parallel_line_does_not_choose_a_pi_rotation() -> None:
     settings = AlignmentSettings(
-        CameraExtrinsics(0.0, 0.0, 0.0), 0.0, 0.26,
+        CameraExtrinsics(0.0, 0.0, 0.0), 0.30, 1.2, 0.26,
         AlignmentControlParams(0.35, 0.8, 0.15, 0.3, 0.03, 0.035),
+        0.035, 0.02, 0.03, 10,
     )
     # Reversed shoulder order produces a pi line direction but must remain aligned.
     result = compute_camera_alignment(
@@ -35,5 +37,8 @@ def test_parallel_line_does_not_choose_a_pi_rotation() -> None:
     )
 
     assert result.target is not None
-    assert abs(result.target.yaw_rad) < 1e-9
-    assert result.command.angular_z_rad_s == pytest.approx(0.0)
+    # The reversed transverse line may select either +90 or -90 degrees, but
+    # must never request a 180-degree turn.
+    assert abs(result.target.yaw_rad) == pytest.approx(math.pi / 2.0)
+    # The cart first turns toward the front-of-shoulders target.
+    assert result.command.angular_z_rad_s > 0.0

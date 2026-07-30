@@ -17,6 +17,11 @@ from geometry.shoulder_geometry import (
 )
 from geometry.vector_math import Point3D, vector_between_points, wrap_angle_radians
 from geometry.body_reference import estimate_body_line_yaw_rad
+from geometry.frame_transform import (
+    CameraExtrinsics,
+    transform_base_point_to_optical,
+    transform_optical_point_to_base,
+)
 
 
 def test_vector_between_points_returns_expected_component() -> None:
@@ -99,3 +104,16 @@ def test_pelvis_can_verify_shoulder_body_line() -> None:
 
     assert estimate.valid is True
     assert estimate.source == "shoulders_verified_by_pelvis"
+
+
+def test_camera_transform_round_trip() -> None:
+    extrinsics = CameraExtrinsics(-0.5, 0.0, 0.6, pitch_down_rad=math.radians(40.0))
+    point_base = Point3D(1.5, 0.2, 0.45)
+
+    recovered = transform_optical_point_to_base(
+        transform_base_point_to_optical(point_base, extrinsics), extrinsics
+    )
+
+    assert recovered.x_m == pytest.approx(point_base.x_m)
+    assert recovered.y_m == pytest.approx(point_base.y_m)
+    assert recovered.z_m == pytest.approx(point_base.z_m)

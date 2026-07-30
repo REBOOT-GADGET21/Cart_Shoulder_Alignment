@@ -16,9 +16,14 @@ class AlignmentSettings:
     """Parameters needed between camera 3D points and a Twist command."""
 
     camera_extrinsics: CameraExtrinsics
-    lateral_offset_m: float
+    front_clearance_m: float
+    body_length_m: float
     shoulder_pelvis_parallel_tolerance_rad: float
     controller: AlignmentControlParams
+    yaw_tolerance_rad: float
+    lateral_tolerance_m: float
+    longitudinal_tolerance_m: float
+    required_stable_frames: int
 
 
 def load_alignment_settings(config_path: str | None = None) -> AlignmentSettings:
@@ -40,11 +45,16 @@ def load_alignment_settings(config_path: str | None = None) -> AlignmentSettings
             raw["camera_to_base_x_m"], raw["camera_to_base_y_m"], raw["camera_to_base_z_m"],
             raw["camera_roll_rad"], raw["camera_pitch_down_rad"], raw["camera_yaw_rad"],
         ),
-        lateral_offset_m=raw["alignment_lateral_offset_m"],
+        front_clearance_m=raw["alignment_front_clearance_m"],
+        body_length_m=raw["body_length_m"],
         shoulder_pelvis_parallel_tolerance_rad=raw["shoulder_pelvis_parallel_tolerance_rad"],
         controller=AlignmentControlParams(
             raw["alignment_position_kp"], raw["alignment_yaw_kp"],
             raw["alignment_max_speed_mps"], raw["alignment_max_yaw_rate_rad_s"],
-            raw["alignment_longitudinal_tolerance_m"], raw["alignment_yaw_tolerance_rad"],
+            min(raw["alignment_lateral_tolerance_m"], raw["alignment_longitudinal_tolerance_m"]), raw["alignment_yaw_tolerance_rad"],
         ),
+        yaw_tolerance_rad=raw["alignment_yaw_tolerance_rad"],
+        lateral_tolerance_m=raw["alignment_lateral_tolerance_m"],
+        longitudinal_tolerance_m=raw["alignment_longitudinal_tolerance_m"],
+        required_stable_frames=int(raw["alignment_required_stable_frames"]),
     )

@@ -1,4 +1,4 @@
-"""Tests for independently steered and driven rear wheel modules."""
+"""Tests for fixed-wheel differential drive."""
 
 import sys
 from pathlib import Path
@@ -21,26 +21,26 @@ def test_straight_motion_has_zero_steering_and_equal_drive() -> None:
     assert command.right.wheel_speed_mps == pytest.approx(0.2)
 
 
-def test_left_turn_has_independent_rear_steering_and_drive() -> None:
+def test_left_turn_has_different_fixed_wheel_speeds() -> None:
     command = compute_rear_steer_command(0.2, 0.2, VehicleParams())
 
-    assert command.left.steering_angle_rad < command.right.steering_angle_rad < 0.0
-    assert command.left.wheel_speed_mps != pytest.approx(command.right.wheel_speed_mps)
+    assert command.left.steering_angle_rad == command.right.steering_angle_rad == 0.0
+    assert command.left.wheel_speed_mps < command.right.wheel_speed_mps
 
 
 def test_in_place_rotation_has_opposing_wheel_speeds() -> None:
     command = compute_rear_steer_command(0.0, 0.2, VehicleParams())
 
     assert command.left.wheel_speed_mps == pytest.approx(-command.right.wheel_speed_mps)
-    assert command.left.steering_angle_rad != pytest.approx(command.right.steering_angle_rad)
+    assert command.left.steering_angle_rad == command.right.steering_angle_rad == 0.0
 
 
-def test_steering_limit_uses_wheel_reversal_when_needed() -> None:
-    params = VehicleParams(max_steering_angle_rad=0.2)
+def test_wheel_speed_is_limited() -> None:
+    params = VehicleParams(max_wheel_speed_mps=0.2)
     command = compute_rear_steer_command(0.4, 0.5, params)
 
-    assert abs(command.left.steering_angle_rad) <= 0.2
-    assert abs(command.right.steering_angle_rad) <= 0.2
+    assert abs(command.left.wheel_speed_mps) <= 0.2
+    assert abs(command.right.wheel_speed_mps) <= 0.2
 
 
 def test_zero_command_returns_safe_zero_commands() -> None:

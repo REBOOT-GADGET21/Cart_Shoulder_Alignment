@@ -25,17 +25,24 @@ def closest_parallel_yaw_rad(line_yaw_rad: float, reference_yaw_rad: float = 0.0
     return min((first, second), key=lambda yaw_rad: abs(wrap_angle_radians(yaw_rad - reference_yaw_rad)))
 
 
-def compute_side_alignment_target(
+def compute_front_alignment_target(
     body_center: Point3D,
     body_line_yaw_rad: float,
-    lateral_offset_m: float,
+    cart_body_length_m: float,
+    front_clearance_m: float,
 ) -> TargetPose2D:
-    """Place base_link at a signed normal offset while keeping it parallel to body line."""
+    """Place the cart in front of the shoulder line with parallel body axes.
 
-    yaw_rad = closest_parallel_yaw_rad(body_line_yaw_rad)
-    normal_x_m, normal_y_m = -math.sin(yaw_rad), math.cos(yaw_rad)
+    ``body_line_yaw_rad`` is the shoulder-to-shoulder line, i.e. the person's
+    width.  The cart length is parallel to the person's body direction (90
+    degrees from that line).  The target is measured from the cart's *front
+    edge*, not its centre: half the cart length is included automatically.
+    """
+
+    yaw_rad = closest_parallel_yaw_rad(body_line_yaw_rad + math.pi / 2.0)
+    front_to_shoulder_m = cart_body_length_m / 2.0 + front_clearance_m
     return TargetPose2D(
-        x_m=body_center.x_m + lateral_offset_m * normal_x_m,
-        y_m=body_center.y_m + lateral_offset_m * normal_y_m,
+        x_m=body_center.x_m - front_to_shoulder_m * math.cos(yaw_rad),
+        y_m=body_center.y_m - front_to_shoulder_m * math.sin(yaw_rad),
         yaw_rad=yaw_rad,
     )

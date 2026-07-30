@@ -23,6 +23,7 @@ setup(
         "console_scripts": [
             "alignment_node=alignment.alignment_node:main",
             "fake_body_landmarks_publisher=alignment.fake_shoulder_publisher:main",
+            "gazebo_ground_truth_publisher=alignment.gazebo_ground_truth_publisher:main",
         ],
     },
 )

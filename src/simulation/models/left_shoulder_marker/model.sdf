@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <!-- Red = left shoulder.  The pole's base is the landmark's xy position. -->
+  <model name="left_shoulder_marker"><static>true</static>
+    <link name="left_shoulder_frame">
+      <visual name="pole"><pose>0 0 0.18 0 0 0</pose><geometry><cylinder><radius>0.012</radius><length>0.36</length></cylinder></geometry><material><emissive>1 0 0 1</emissive><diffuse>1 0 0 1</diffuse></material></visual>
+      <visual name="point"><pose>0 0 0.38 0 0 0</pose><geometry><sphere><radius>0.065</radius></sphere></geometry><material><emissive>1 0 0 1</emissive><diffuse>1 0 0 1</diffuse></material></visual>
+    </link>
+  </model>
+</sdf>

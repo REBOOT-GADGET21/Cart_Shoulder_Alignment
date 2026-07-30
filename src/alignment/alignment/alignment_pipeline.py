@@ -11,7 +11,7 @@ from geometry.vector_math import Point3D
 
 from .alignment_controller import VelocityCommand, compute_final_alignment_command
 from .calibration import AlignmentSettings
-from .target_pose import TargetPose2D, compute_side_alignment_target
+from .target_pose import TargetPose2D, compute_front_alignment_target
 
 
 @dataclass(frozen=True)
@@ -46,5 +46,7 @@ def compute_camera_alignment(landmarks: BodyLandmarksOptical, settings: Alignmen
     if not body_line.valid:
         return AlignmentPipelineResult(None, VelocityCommand(0.0, 0.0), False, body_line.source)
     center = compute_shoulder_center(left_shoulder, right_shoulder)
-    target = compute_side_alignment_target(center, body_line.yaw_rad, settings.lateral_offset_m)
+    target = compute_front_alignment_target(
+        center, body_line.yaw_rad, settings.body_length_m, settings.front_clearance_m,
+    )
     return AlignmentPipelineResult(target, compute_final_alignment_command(target, settings.controller), True, body_line.source)

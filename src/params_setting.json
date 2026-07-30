@@ -8,7 +8,7 @@
   "max_steering_angle_rad": 1.5707963267948966,
   "max_wheel_speed_mps": 0.4,
   "max_yaw_rate_rad_s": 0.5,
-  "alignment_lateral_offset_m": 0.45,
+  "alignment_front_clearance_m": 0.70,
   "alignment_yaw_tolerance_rad": 0.035,
   "alignment_lateral_tolerance_m": 0.02,
   "alignment_longitudinal_tolerance_m": 0.03,
@@ -24,5 +24,9 @@
   "alignment_yaw_kp": 0.8,
   "alignment_max_speed_mps": 0.15,
   "alignment_max_yaw_rate_rad_s": 0.3,
+  "gazebo_fake_left_shoulder_x_m": 2.63,
+  "gazebo_fake_left_shoulder_y_m": -1.82,
+  "gazebo_fake_right_shoulder_x_m": 2.27,
+  "gazebo_fake_right_shoulder_y_m": -2.18,
   "dynamixel_model": "XM430-W350"
 }

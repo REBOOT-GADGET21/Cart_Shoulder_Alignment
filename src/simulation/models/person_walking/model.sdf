@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <!-- Supplied standing.dae, fixed and rotated 90 degrees into a lying patient. -->
+  <model name="person_walking">
+    <static>true</static>
+    <link name="patient_link">
+      <!-- The MakeHuman back (local +Y) faces downward.  Local head-to-foot Z
+           becomes world -X, so the head is closer to the cart at world origin. -->
+      <pose>0.85 0 0.20 -1.57079632679 0 1.57079632679</pose>
+      <visual name="patient_visual">
+        <geometry>
+          <mesh><uri>model://person_walking/meshes/standing.dae</uri></mesh>
+        </geometry>
+      </visual>
+      <!-- A simple static collision shape prevents the cart from passing through
+           the patient without requiring expensive mesh collision physics. -->
+      <collision name="patient_collision">
+        <pose>0 0 0.02 0 0 0</pose>
+        <geometry><box><size>1.75 0.55 0.32</size></box></geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>
