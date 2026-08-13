@@ -7,9 +7,11 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -32,6 +34,7 @@ def generate_launch_description() -> LaunchDescription:
         "/model/rear_steer_cart/pose@geometry_msgs/msg/PoseArray@gz.msgs.Pose_V",
     ]
     return LaunchDescription([
+        DeclareLaunchArgument("rviz", default_value="false"),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(str(package_dir / "launch" / "cart_only.launch.py"))),
         Node(package="ros_gz_bridge", executable="parameter_bridge", arguments=bridge_arguments, output="screen"),
         Node(package="rear_ackermann_controller", executable="rear_ackermann_node", output="screen"),
@@ -45,4 +48,10 @@ def generate_launch_description() -> LaunchDescription:
             output="screen",
         ),
         Node(package="alignment", executable="gazebo_ground_truth_publisher", output="screen"),
+        Node(package="vision", executable="shoulder_line_markers", condition=IfCondition(LaunchConfiguration("rviz")), output="screen"),
+        Node(
+            package="rviz2", executable="rviz2",
+            arguments=["-d", str(Path(get_package_share_directory("vision")) / "rviz" / "shoulder_alignment.rviz")],
+            condition=IfCondition(LaunchConfiguration("rviz")), output="screen",
+        ),
     ])

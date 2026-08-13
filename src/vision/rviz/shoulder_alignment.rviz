@@ -1,0 +1,26 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Fixed Frame: odom
+  Displays:
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Show Names: true
+      Show Axes: true
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Shoulders
+      Topic: /shoulder_line_markers
+      Enabled: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Alignment debug
+      Topic: /shoulder_align/debug_markers
+      Enabled: true
+    - Class: rviz_default_plugins/Odometry
+      Name: Filtered odometry
+      Topic: /odometry/filtered
+      Enabled: true

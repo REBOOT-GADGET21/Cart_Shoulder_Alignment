@@ -10,6 +10,9 @@ import rclpy
 from geometry_msgs.msg import Pose, PoseArray
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from std_msgs.msg import Bool
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
+from geometry_msgs.msg import TransformStamped
 
 from geometry.frame_transform import transform_base_point_to_optical
 from geometry.vector_math import Point3D
@@ -51,16 +54,40 @@ class GazeboGroundTruthPublisher(Node):
     def __init__(self) -> None:
         super().__init__("gazebo_ground_truth_publisher")
         self.settings = load_alignment_settings()
+        self.declare_parameter("publish_shoulders", True)
+        self.publish_shoulders = bool(self.get_parameter("publish_shoulders").value)
         self.publisher = self.create_publisher(PoseArray, "/fake_body_landmarks_optical", 10)
         self.cart_pose_publisher = self.create_publisher(Pose, "/gazebo_ground_truth/cart_pose", 10)
         self.odom_publisher = self.create_publisher(Odometry, "/odom", 20)
         self.shoulder_line_publisher = self.create_publisher(PoseArray, "/shoulder_line", 10)
+        self.shoulder_status_publisher = self.create_publisher(Bool, "/shoulder_line_status", 10)
+        self.tf_broadcaster = TransformBroadcaster(self)
+        self.static_tf_broadcaster = StaticTransformBroadcaster(self)
         self.subscription = self.create_subscription(PoseArray, "/model/rear_steer_cart/pose", self.on_cart_pose, 10)
         self.cart_x_m = 0.0
         self.cart_y_m = 0.0
         self.cart_yaw_rad = 0.0
         self.timer = self.create_timer(0.05, self.publish_landmarks)
         self.patient_points_world = _load_fake_patient_landmarks()
+        self.publish_static_frames()
+
+    def publish_static_frames(self) -> None:
+        """Expose the same named frames used by hardware RViz/perception."""
+        rear = TransformStamped()
+        rear.header.stamp = self.get_clock().now().to_msg()
+        rear.header.frame_id, rear.child_frame_id = "base_link", "rear_axle_pivot"
+        rear.transform.translation.x = self.settings.rear_axle_x_m
+        rear.transform.rotation.w = 1.0
+        camera = TransformStamped()
+        camera.header.stamp = rear.header.stamp
+        camera.header.frame_id, camera.child_frame_id = "rear_axle_pivot", "camera_color_optical_frame"
+        camera.transform.translation.x = self.settings.rear_axle_x_m + self.settings.camera_extrinsics.translation_x_m
+        camera.transform.translation.y = self.settings.camera_extrinsics.translation_y_m
+        camera.transform.translation.z = self.settings.camera_extrinsics.translation_z_m
+        # Optical axes (right, down, forward) relative to an unrotated ROS base frame.
+        camera.transform.rotation.x, camera.transform.rotation.y = -0.5, 0.5
+        camera.transform.rotation.z, camera.transform.rotation.w = -0.5, 0.5
+        self.static_tf_broadcaster.sendTransform([rear, camera])
 
     def on_cart_pose(self, message: PoseArray) -> None:
         """Store the current Gazebo model pose; this is fake-sensor plumbing only."""
@@ -74,6 +101,12 @@ class GazeboGroundTruthPublisher(Node):
         self.cart_pose_publisher.publish(cart_pose)
         q = cart_pose.orientation
         self.cart_yaw_rad = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        transform = TransformStamped()
+        transform.header.stamp = self.get_clock().now().to_msg()
+        transform.header.frame_id, transform.child_frame_id = "odom", "base_link"
+        transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z = self.cart_x_m, self.cart_y_m, cart_pose.position.z
+        transform.transform.rotation = q
+        self.tf_broadcaster.sendTransform(transform)
         # Gazebo's model pose is base_link (platform centre).  The C++ TRT node
         # explicitly controls the physical rear-axle pivot instead.
         odom = Odometry()
@@ -101,6 +134,8 @@ class GazeboGroundTruthPublisher(Node):
             message.poses.append(pose)
         self.publisher.publish(message)
 
+        if not self.publish_shoulders:
+            return
         shoulder_line = PoseArray()
         shoulder_line.header.stamp = self.get_clock().now().to_msg()
         shoulder_line.header.frame_id = "odom"
@@ -109,6 +144,7 @@ class GazeboGroundTruthPublisher(Node):
             pose.position.x, pose.position.y, pose.position.z = point_world.x_m, point_world.y_m, point_world.z_m
             shoulder_line.poses.append(pose)
         self.shoulder_line_publisher.publish(shoulder_line)
+        self.shoulder_status_publisher.publish(Bool(data=True))
 
 
 def main(args: list[str] | None = None) -> None:
