@@ -274,6 +274,7 @@ private:
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
+  // ROS2 노드가 메시지, timer, service를 계속 처리하도록 하는 실행 루프
   rclcpp::spin(std::make_shared<ShoulderAlignNode>());
   rclcpp::shutdown();
   return 0;

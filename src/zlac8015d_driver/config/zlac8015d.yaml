@@ -1,0 +1,37 @@
+# 파라미터 YAML
+
+zlac8015d_driver:
+  ros__parameters:
+    # /dev/ttyUSB0 대신 재연결에도 변하지 않는 /dev/serial/by-id 경로를 권장한다.
+    serial_port: "/dev/serial/by-id/usb-WCH.CN_USB_Quad_Serial_BC0489ABCD-if00"
+    baudrate: 115200
+    driver_id: 1
+    serial_timeout_ms: 100
+    max_communication_failures: 3
+
+    # 휠 축과 모터 축 사이의 실제 감속비를 입력한다. 직결이면 1.0이다.
+    gear_ratio: 1.0
+    # 실제 전진 시 ZLAC raw 명령은 Left 음수, Right 양수여야 한다.
+    left_motor_inverted: true
+    right_motor_inverted: false
+    # ZLAC8015D 레지스터 한계는 3000 RPM이지만, 장착 모터의 안전 한계를 입력한다.
+    max_motor_rpm: 10.0
+    acceleration_time_ms: 500
+    deceleration_time_ms: 500
+
+    command_timeout_sec: 0.5
+    fault_poll_rate_hz: 10.0
+    reconnect_interval_sec: 1.0
+
+    # 실제 바퀴 1회전에서 직접 측정한 ZLAC position feedback 변화량이다.
+    encoder_counts_per_rev: 16384.0
+    left_encoder_sign: -1
+    right_encoder_sign: 1
+
+wheel_odometry:
+  ros__parameters:
+    # 아래 두 값은 아직 실제 차체에서 확정되지 않았다. 0이면 odometry를 시작하지 않는다.
+    wheel_radius_m: 0.2032
+    wheel_track_m: 0.535
+    odom_frame: "odom"
+    base_frame: "base_link"

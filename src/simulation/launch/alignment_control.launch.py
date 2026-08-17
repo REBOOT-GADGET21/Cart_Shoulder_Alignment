@@ -25,6 +25,27 @@ def generate_launch_description() -> LaunchDescription:
     # The alignment node controls the rear-axle pivot.  Convert the actual SDF
     # geometry (base centre -> front edge) into pivot -> front edge distance.
     pivot_to_front_m = config["body_length_m"] / 2.0 - config["rear_axle_x_m"]
+    # Keep controller inputs in the single JSON source.  Geometry-derived
+    # platform_length_m intentionally remains derived here, so it cannot drift
+    # from the cart model when body geometry changes.
+    shoulder_align_parameters = {
+        "stop_distance_m": config["alignment_front_clearance_m"],
+        "platform_length_m": pivot_to_front_m,
+        "pos_tolerance_m": min(
+            config["alignment_lateral_tolerance_m"],
+            config["alignment_longitudinal_tolerance_m"],
+        ),
+        "angle_tolerance_rad": config["alignment_yaw_tolerance_rad"],
+        "max_valid_t_m": config["shoulder_align_max_valid_t_m"],
+        "parallel_epsilon": config["shoulder_align_parallel_epsilon"],
+        "k_v": config["alignment_position_kp"],
+        "k_w": config["alignment_yaw_kp"],
+        "max_v_mps": config["alignment_max_speed_mps"],
+        "max_w_rad_s": config["alignment_max_yaw_rate_rad_s"],
+        "debounce_s": config["shoulder_align_debounce_s"],
+        "pos_hysteresis_m": config["shoulder_align_pos_hysteresis_m"],
+        "angle_hysteresis_rad": config["shoulder_align_angle_hysteresis_rad"],
+    }
     bridge_arguments = [
         "/rear_left_wheel_speed_cmd@std_msgs/msg/Float64@gz.msgs.Double",
         "/rear_right_wheel_speed_cmd@std_msgs/msg/Float64@gz.msgs.Double",
@@ -41,10 +62,7 @@ def generate_launch_description() -> LaunchDescription:
         Node(
             package="shoulder_align_controller",
             executable="shoulder_align_node",
-            parameters=[{
-                "stop_distance_m": config["alignment_front_clearance_m"],
-                "platform_length_m": pivot_to_front_m,
-            }],
+            parameters=[shoulder_align_parameters],
             output="screen",
         ),
         Node(package="alignment", executable="gazebo_ground_truth_publisher", output="screen"),
