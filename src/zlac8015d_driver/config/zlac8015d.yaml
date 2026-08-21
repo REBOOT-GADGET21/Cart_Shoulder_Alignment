@@ -16,8 +16,8 @@ zlac8015d_driver:
     right_motor_inverted: false
     # ZLAC8015D 레지스터 한계는 3000 RPM이지만, 장착 모터의 안전 한계를 입력한다.
     max_motor_rpm: 10.0
-    acceleration_time_ms: 500
-    deceleration_time_ms: 500
+    acceleration_time_ms: 200
+    deceleration_time_ms: 200
 
     command_timeout_sec: 0.5
     fault_poll_rate_hz: 10.0
@@ -28,18 +28,3 @@ zlac8015d_driver:
     encoder_counts_per_rev: 16383.5
     left_encoder_sign: -1
     right_encoder_sign: 1
-
-wheel_odometry:
-  ros__parameters:
-    # 아래 두 값은 아직 실제 차체에서 확정되지 않았다. 0이면 odometry를 시작하지 않는다.
-    # 실제 값은 0.1016지만 아래와 같은 값으로 보정
-    wheel_radius_m: 0.1037
-    # 실제 값은 0.535지만 0.5525로 보정
-    wheel_track_m: 0.5525
-    odom_frame: "odom"
-    base_frame: "base_link"
-    # 위치는 encoder, yaw는 iAHRS orientation quaternion을 사용한다.
-    use_imu_yaw: true
-    imu_topic: "/imu/data"
-    # 이 시간 동안 IMU 수신이 없으면 잘못된 방향 누적을 피하기 위해 odom 발행을 멈춘다.
-    imu_timeout_sec: 0.2

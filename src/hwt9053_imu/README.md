@@ -13,7 +13,7 @@ ros2 launch hwt9053_imu hwt9053_imu.launch.py
 
 launch 파일은 기본으로 패키지의 `config/hwt9053_imu.yaml`을 불러옵니다. 별도 설정 파일을 쓰는 경우에만 `params_file:=/path/to/custom.yaml`을 추가하십시오.
 
-`config/hwt9053_imu.yaml`의 `imu_static_tf.ros__parameters`에서 장착 변환을 바꿉니다. `x/y/z`는 m, `roll/pitch/yaw`는 radian입니다. 수정 뒤에는 이 패키지만 다시 build하고 새 launch를 실행합니다. `enable_static_tf:=false`로 정적 TF를 끌 수 있습니다.
+IMU 장착 변환은 `src/params_setting.json`의 `base_to_imu_*`에서 바꿉니다. `x/y/z`는 m, `roll/pitch/yaw`는 radian입니다. 수정 뒤에는 이 패키지만 다시 build하고 새 launch를 실행합니다. `enable_static_tf:=false`로 정적 TF를 끌 수 있습니다.
 
 정적 TF는 `base_link -> imu_link`만 발행합니다. 센서 설정의 `frame_id`와 launch의 `imu_frame`은 같은 값으로 유지하십시오.
 

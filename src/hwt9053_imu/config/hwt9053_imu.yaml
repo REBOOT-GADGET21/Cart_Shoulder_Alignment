@@ -7,16 +7,3 @@ hwt9053_imu:
     frame_id: imu_link
     relative_orientation: true
     response_timeout_ms: 50
-
-# base_link 원점에서 실제 HWT9053 IMU까지의 고정 장착 변환이다.
-# x/y/z 단위는 m, roll/pitch/yaw 단위는 rad이다.
-imu_static_tf:
-  ros__parameters:
-    base_frame: base_link
-    imu_frame: imu_link
-    x: 0.31
-    y: 0.0
-    z: 0.095
-    roll: 0.0
-    pitch: 0.0
-    yaw: 0.0

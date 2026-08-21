@@ -1,20 +1,35 @@
 {
   "__commet": "카트 차체의 앞뒤 전체 길이(m), 카트 차체의 좌우 전체 폭(m),",
-  "body_length_m": 1.2,
-  "body_width_m": 0.6,
+  "body_length_m": 1.310,
+  "body_width_m": 0.611,
 
   "__commet": "base_link 원점 기준 후륜 축의 x 위치(m), 좌우 후륜 중심 사이 거리(m)",
-  "rear_axle_x_m": -0.5,
-  "rear_track_m": 0.5,
+  "rear_axle_x_m": -0.505,
+  "rear_track_m": 0.5425,
 
   "__commet": "base_link 원점 기준 전방 캐스터의 x 위치(m), 구동 바퀴 반지름(m)",
-  "front_caster_x_m": 0.5,
-  "wheel_radius_m": 0.2,
+  "front_caster_x_m": 0.45937,
+  "wheel_radius_m": 0.1016,
+
+  "__commet": "IMU 파라미터 설정",
+  "odom_frame": "odom",
+  "base_frame": "base_link",
+  "use_imu_yaw": true,
+  "imu_topic": "/imu/data",
+  "imu_timeout_sec": 0.2,
+
+  "__commet": "IMU 장착 위치",
+  "base_to_imu_x_m": -0.204,
+  "base_to_imu_y_m": 0.0,
+  "base_to_imu_z_m": 0.095,
+  "base_to_imu_roll_rad": 0.0,
+  "base_to_imu_pitch_rad": 0.0,
+  "base_to_imu_yaw_rad": 0.0,
 
   "__commet": "조향 가능한 최대 각도(rad), 바퀴의 최대 선속도(m/s), 차량의 최대 회전 속도(rad/s)",
   "max_steering_angle_rad": 1.5707963267948966,
-  "max_wheel_speed_mps": 0.4,
-  "max_yaw_rate_rad_s": 0.5,
+  "max_wheel_speed_mps": 0.3,
+  "max_yaw_rate_rad_s": 0.1,
 
   "__commet": "사람의 전방 어깨선에서 유지할 최종 여유 거리(m), 정렬 완료로 판단하는 허용 헤딩 오차(rad)",
   "__commet": "정렬 완료로 판단하는 좌우 위치 허용 오차(m), 정렬 완료로 판단하는 앞뒤 위치 허용 오차(m)",
@@ -40,8 +55,8 @@
   "alignment_yaw_kp": 0.8,
 
   "__commet": "shoulder_align의 최대 전진 속도(m/s), shoulder_align의 최대 회전 속도(rad/s)",
-  "alignment_max_speed_mps": 0.15,
-  "alignment_max_yaw_rate_rad_s": 0.3,
+  "alignment_max_speed_mps": 0.3,
+  "alignment_max_yaw_rate_rad_s": 0.1,
 
   "__commet": "교차점 계산 결과로 허용할 최대 거리(m), 두 직선이 평행하다고 판단하는 수치 허용 오차",
   "__commet": "상태 전환 뒤 다음 전환까지 기다리는 최소 시간(s), 위치 완료 조건의 채터링 방지 여유(m), 각도 완료 조건의 채터링 방지 여유(rad)",
@@ -51,10 +66,9 @@
   "shoulder_align_pos_hysteresis_m": 0.01,
   "shoulder_align_angle_hysteresis_rad": 0.01,
 
-  "__commet": "Gazebo 가짜 왼쪽 어깨의 x 좌표(m), Gazebo 가짜 왼쪽 어깨의 y 좌표(m)",
-  "__commet": "Gazebo 가짜 오른쪽 어깨의 x 좌표(m), Gazebo 가짜 오른쪽 어깨의 y 좌표(m)",
-  "gazebo_fake_left_shoulder_x_m": 3.63,
-  "gazebo_fake_left_shoulder_y_m": -1.82,
-  "gazebo_fake_right_shoulder_x_m": 3.27,
-  "gazebo_fake_right_shoulder_y_m": -2.18
+  "__commet": "중심좌표 x, 중심좌표 y, 어깨 폭(불변), 어깨 방향(반시계:+, 시계-)",
+  "gazebo_fake_shoulder_center_x_m": 3.45,
+  "gazebo_fake_shoulder_center_y_m": -2.00,
+  "gazebo_fake_shoulder_width_m": 0.509,
+  "gazebo_fake_shoulder_angle_deg": 0.0
 }

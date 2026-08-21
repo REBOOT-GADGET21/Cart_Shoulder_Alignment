@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
+from alignment.fake_shoulder_geometry import fake_shoulder_line_from_config
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess, SetEnvironmentVariable, TimerAction
 from launch_ros.actions import Node
@@ -25,8 +26,9 @@ def generate_launch_description() -> LaunchDescription:
     if not config_file.exists():
         config_file = Path(get_package_share_directory("alignment")) / "config" / "params_setting.json"
     config = json.loads(config_file.read_text(encoding="utf-8"))
-    left_x, left_y = config["gazebo_fake_left_shoulder_x_m"], config["gazebo_fake_left_shoulder_y_m"]
-    right_x, right_y = config["gazebo_fake_right_shoulder_x_m"], config["gazebo_fake_right_shoulder_y_m"]
+    shoulder_line = fake_shoulder_line_from_config(config)
+    left_x, left_y = shoulder_line.left.x_m, shoulder_line.left.y_m
+    right_x, right_y = shoulder_line.right.x_m, shoulder_line.right.y_m
     body_yaw = math.atan2(right_y - left_y, right_x - left_x) + math.pi / 2.0
     shoulder_center_x, shoulder_center_y = (left_x + right_x) / 2.0, (left_y + right_y) / 2.0
     # In person_walking/model.sdf, shoulder centre is local (-0.55, 0).
