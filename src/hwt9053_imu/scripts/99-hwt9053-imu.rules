@@ -1,0 +1,4 @@
+# Replace ATTRS{idVendor}/ATTRS{idProduct} with the values from: udevadm info -a -n /dev/ttyUSB0
+# The serial attribute keeps the symlink stable when multiple identical USB adapters exist.
+# USB 포트 설정 파일
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="imu_usb", MODE="0660", GROUP="dialout"

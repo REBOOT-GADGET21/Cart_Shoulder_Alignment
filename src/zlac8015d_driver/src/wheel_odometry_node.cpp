@@ -6,6 +6,7 @@
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 
@@ -19,6 +20,9 @@ public:
     wheel_track_m_ = declare_parameter<double>("wheel_track_m", 0.0);
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
     base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
+    use_imu_yaw_ = declare_parameter<bool>("use_imu_yaw", true);
+    imu_topic_ = declare_parameter<std::string>("imu_topic", "/imu/data");
+    imu_timeout_sec_ = declare_parameter<double>("imu_timeout_sec", 0.2);
     if (wheel_radius_m_ <= 0.0 || wheel_track_m_ <= 0.0) {
       throw std::invalid_argument("wheel_radius_m과 wheel_track_m은 실제 측정값으로 설정해야 합니다");
     }
@@ -27,9 +31,49 @@ public:
     joint_subscription_ = create_subscription<sensor_msgs::msg::JointState>(
       "/zlac8015d/wheel_joint_states", 10,
       [this](const sensor_msgs::msg::JointState::SharedPtr message) {on_wheel_state(*message);});
+    if (use_imu_yaw_) {
+      imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
+        imu_topic_, rclcpp::SensorDataQoS(),
+        [this](const sensor_msgs::msg::Imu::SharedPtr message) {on_imu(*message);});
+    }
   }
 
 private:
+  static double normalize_angle(const double angle_rad)
+  {
+    return std::atan2(std::sin(angle_rad), std::cos(angle_rad));
+  }
+
+  void on_imu(const sensor_msgs::msg::Imu & message)
+  {
+    const auto & orientation = message.orientation;
+    const double norm_squared =
+      orientation.x * orientation.x + orientation.y * orientation.y +
+      orientation.z * orientation.z + orientation.w * orientation.w;
+    if (!std::isfinite(norm_squared) || norm_squared < 1.0e-12) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "IMU orientation quaternion이 유효하지 않습니다");
+      return;
+    }
+
+    // quaternion에서 수평 회전각(yaw)만 추출한다.
+    const double sin_yaw = 2.0 * (orientation.w * orientation.z + orientation.x * orientation.y);
+    const double cos_yaw = 1.0 - 2.0 * (orientation.y * orientation.y + orientation.z * orientation.z);
+    const double raw_yaw_rad = std::atan2(sin_yaw, cos_yaw);
+    if (!received_imu_baseline_) {
+      // 시작 순간을 odom 좌표계의 yaw=0으로 둔다.
+      imu_yaw_reference_rad_ = raw_yaw_rad;
+      received_imu_baseline_ = true;
+    }
+    imu_yaw_rad_ = normalize_angle(raw_yaw_rad - imu_yaw_reference_rad_);
+    last_imu_receive_time_ = now();
+    received_imu_ = true;
+  }
+
+  bool imu_yaw_is_fresh() const
+  {
+    return received_imu_ && (now() - last_imu_receive_time_).seconds() <= imu_timeout_sec_;
+  }
+
   void on_wheel_state(const sensor_msgs::msg::JointState & message)
   {
     if (message.name.size() != 2 || message.position.size() != 2 ||
@@ -49,14 +93,25 @@ private:
       received_baseline_ = true;
       return;
     }
+    if (use_imu_yaw_ && !imu_yaw_is_fresh()) {
+      // IMU가 멈춘 동안 encoder yaw를 누적하지 않아, 복구 시 방향 불연속을 막는다.
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "최신 IMU yaw를 기다리는 중입니다");
+      previous_left_angle_rad_ = message.position[0];
+      previous_right_angle_rad_ = message.position[1];
+      previous_stamp_ = stamp;
+      return;
+    }
     const double delta_left_m = (message.position[0] - previous_left_angle_rad_) * wheel_radius_m_;
     const double delta_right_m = (message.position[1] - previous_right_angle_rad_) * wheel_radius_m_;
     const double delta_s_m = (delta_left_m + delta_right_m) * 0.5;
-    const double delta_yaw_rad = (delta_right_m - delta_left_m) / wheel_track_m_;
+    // 위치는 encoder 이동량으로, 방향은 검증된 IMU yaw로 계산한다.
+    const double next_yaw_rad = use_imu_yaw_ ? imu_yaw_rad_ :
+      normalize_angle(yaw_rad_ + (delta_right_m - delta_left_m) / wheel_track_m_);
+    const double delta_yaw_rad = normalize_angle(next_yaw_rad - yaw_rad_);
     const double yaw_mid_rad = yaw_rad_ + delta_yaw_rad * 0.5;
     x_m_ += delta_s_m * std::cos(yaw_mid_rad);
     y_m_ += delta_s_m * std::sin(yaw_mid_rad);
-    yaw_rad_ = std::atan2(std::sin(yaw_rad_ + delta_yaw_rad), std::cos(yaw_rad_ + delta_yaw_rad));
+    yaw_rad_ = next_yaw_rad;
     const double dt_sec = (stamp - previous_stamp_).seconds();
     publish_odometry(stamp, dt_sec > 0.0 ? delta_s_m / dt_sec : 0.0, dt_sec > 0.0 ? delta_yaw_rad / dt_sec : 0.0);
     previous_left_angle_rad_ = message.position[0];
@@ -89,10 +144,17 @@ private:
 
   double wheel_radius_m_{}, wheel_track_m_{};
   std::string odom_frame_, base_frame_;
+  bool use_imu_yaw_{};
+  std::string imu_topic_;
+  double imu_timeout_sec_{};
   bool received_baseline_{false};
   double previous_left_angle_rad_{}, previous_right_angle_rad_{}, x_m_{}, y_m_{}, yaw_rad_{};
   rclcpp::Time previous_stamp_;
+  bool received_imu_{false}, received_imu_baseline_{false};
+  double imu_yaw_reference_rad_{}, imu_yaw_rad_{};
+  rclcpp::Time last_imu_receive_time_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };

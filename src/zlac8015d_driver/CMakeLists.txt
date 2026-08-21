@@ -25,7 +25,10 @@ ament_target_dependencies(zlac8015d_driver_node rclcpp sensor_msgs std_msgs std_
 add_executable(wheel_odometry_node src/wheel_odometry_node.cpp)
 ament_target_dependencies(wheel_odometry_node rclcpp nav_msgs geometry_msgs sensor_msgs tf2_ros)
 
-install(TARGETS zlac8015d_modbus zlac8015d_driver_node wheel_odometry_node DESTINATION lib/${PROJECT_NAME})
+add_executable(imu_degrees_node src/imu_degrees_node.cpp)
+ament_target_dependencies(imu_degrees_node rclcpp geometry_msgs sensor_msgs)
+
+install(TARGETS zlac8015d_modbus zlac8015d_driver_node wheel_odometry_node imu_degrees_node DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 

@@ -16,4 +16,6 @@ def generate_launch_description() -> LaunchDescription:
         # 바퀴 encoder feedback만으로 실제 차체의 /odom을 만든다.
         Node(package="zlac8015d_driver", executable="wheel_odometry_node",
              parameters=[driver_config], output="screen"),
+        # /imu/data quaternion을 사람이 확인하기 쉬운 roll, pitch, yaw [deg]로만 변환한다.
+        Node(package="zlac8015d_driver", executable="imu_degrees_node", output="screen"),
     ])
