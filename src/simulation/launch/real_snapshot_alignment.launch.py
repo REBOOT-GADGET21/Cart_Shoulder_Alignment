@@ -1,4 +1,4 @@
-"""Run TRT in Gazebo against exactly one real D435/MediaPipe shoulder sample."""
+"""Run Hybrid Lyapunov control in Gazebo against one real D435/MediaPipe body sample."""
 
 import json
 from pathlib import Path
@@ -32,6 +32,16 @@ def generate_launch_description() -> LaunchDescription:
         "debounce_s": config["shoulder_align_debounce_s"],
         "pos_hysteresis_m": config["shoulder_align_pos_hysteresis_m"],
         "angle_hysteresis_rad": config["shoulder_align_angle_hysteresis_rad"],
+        "hybrid_alpha_gain": config["hybrid_alpha_gain"],
+        "hybrid_beta_gain": config["hybrid_beta_gain"],
+        "hybrid_min_approach_speed_mps": config["hybrid_min_approach_speed_mps"],
+        "hybrid_alpha_full_speed_rad": config["hybrid_alpha_full_speed_rad"],
+        "hybrid_alpha_stop_rad": config["hybrid_alpha_stop_rad"],
+        "hybrid_final_heading_start_m": config["hybrid_final_heading_start_m"],
+        "hybrid_final_heading_full_m": config["hybrid_final_heading_full_m"],
+        "hybrid_target_position_tau_s": config["hybrid_target_position_tau_s"],
+        "hybrid_target_heading_tau_s": config["hybrid_target_heading_tau_s"],
+        "measurement_timeout_s": config["shoulder_align_measurement_timeout_s"],
     }
     bridge = [
         "/rear_left_wheel_speed_cmd@std_msgs/msg/Float64@gz.msgs.Double",

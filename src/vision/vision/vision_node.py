@@ -53,6 +53,8 @@ class RealSenseMediaPipePoseNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.left_filter, self.right_filter = LandmarkFilter(alpha, window, outlier), LandmarkFilter(alpha, window, outlier)
+        self.head_filter = LandmarkFilter(alpha, window, outlier)
+        self.left_hip_filter, self.right_hip_filter = LandmarkFilter(alpha, window, outlier), LandmarkFilter(alpha, window, outlier)
         self.pipeline = None
         self.detector = None
         self.last_tf_notice_s = 0.0
@@ -122,7 +124,7 @@ class RealSenseMediaPipePoseNode(Node):
             import numpy as np
             bgr = np.asanyarray(color.get_data())
             found = self.detector.detect(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-            if found is None or min(found[0].visibility, found[1].visibility) < self.visibility:
+            if found is None or min(landmark.visibility for landmark in found) < self.visibility:
                 self._preview(bgr, [], [], "No reliable shoulders detected")
                 if self.close_requested:
                     rclpy.shutdown(); return
@@ -133,7 +135,7 @@ class RealSenseMediaPipePoseNode(Node):
             raw_depth = np.asanyarray(depth.get_data())
             points = []
             pixels = []
-            for landmark, filt in zip(found, (self.left_filter, self.right_filter)):
+            for landmark, filt in zip(found, (self.left_filter, self.right_filter, self.head_filter, self.left_hip_filter, self.right_hip_filter)):
                 u, v = round(landmark.x * intrinsics.width), round(landmark.y * intrinsics.height)
                 depth_m = robust_depth_m(raw_depth, u, v, self.depth_scale, self.depth_radius)
                 point = deproject_pixel(intrinsics, u, v, depth_m) if depth_m else None
@@ -142,10 +144,18 @@ class RealSenseMediaPipePoseNode(Node):
                     self._publish_valid(False); return
                 points.append(filt.update(point))
                 pixels.append((u, v))
+            # Preserve the original shoulder order and publish the two required
+            # body-direction points as head centre and pelvis centre.
+            pelvis = type(points[3])(
+                (points[3].x + points[4].x) / 2.0,
+                (points[3].y + points[4].y) / 2.0,
+                (points[3].z + points[4].z) / 2.0,
+            )
+            output_points = [points[0], points[1], points[2], pelvis]
             camera_message = PoseArray()
             camera_message.header.stamp = self.get_clock().now().to_msg()
             camera_message.header.frame_id = self.camera_frame
-            for point in points:
+            for point in output_points:
                 pose = Pose()
                 pose.position.x, pose.position.y, pose.position.z = point.x, point.y, point.z
                 camera_message.poses.append(pose)
@@ -154,13 +164,13 @@ class RealSenseMediaPipePoseNode(Node):
             # 검출된 두 어깨의 중점과 영상 수평 중심의 차이다. 제어값에는 사용하지 않는다.
             shoulder_center_u = (pixels[0][0] + pixels[1][0]) / 2.0
             self.error_x_pub.publish(Float32(data=shoulder_center_u - intrinsics.width / 2.0))
-            self._preview(bgr, pixels, points, "Camera coordinates: x=right, y=down, z=forward")
+            self._preview(bgr, pixels[:2], points[:2], "Camera coordinates: x=right, y=down, z=forward")
             if self.close_requested:
                 self.get_logger().info("Preview closed with q; stopping D435/MediaPipe node")
                 rclpy.shutdown(); return
             if time.monotonic() - self.last_measurement_notice_s >= 1.0:
                 self.last_measurement_notice_s = time.monotonic()
-                self.get_logger().info(f"Camera shoulders [m] left=({points[0].x:+.3f}, {points[0].y:+.3f}, {points[0].z:.3f}), right=({points[1].x:+.3f}, {points[1].y:+.3f}, {points[1].z:.3f})")
+                self.get_logger().info(f"Camera body points [m] shoulders=({points[0].x:+.3f}, {points[0].y:+.3f})/({points[1].x:+.3f}, {points[1].y:+.3f}), head=({points[2].x:+.3f}, {points[2].y:+.3f})")
             message = PoseArray()
             message.header.stamp = camera_message.header.stamp
             message.header.frame_id = self.odom_frame

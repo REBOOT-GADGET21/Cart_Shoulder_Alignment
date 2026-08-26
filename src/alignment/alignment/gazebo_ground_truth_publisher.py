@@ -107,7 +107,7 @@ class GazeboGroundTruthPublisher(Node):
         transform.transform.translation.x, transform.transform.translation.y, transform.transform.translation.z = self.cart_x_m, self.cart_y_m, cart_pose.position.z
         transform.transform.rotation = q
         self.tf_broadcaster.sendTransform(transform)
-        # Gazebo's model pose is base_link (platform centre).  The C++ TRT node
+        # Gazebo's model pose is base_link (platform centre). The C++ controller
         # explicitly controls the physical rear-axle pivot instead.
         odom = Odometry()
         odom.header.stamp = self.get_clock().now().to_msg()
@@ -139,7 +139,14 @@ class GazeboGroundTruthPublisher(Node):
         shoulder_line = PoseArray()
         shoulder_line.header.stamp = self.get_clock().now().to_msg()
         shoulder_line.header.frame_id = "odom"
-        for point_world in self.patient_points_world[:2]:
+        # /shoulder_line contract: left shoulder, right shoulder, head centre,
+        # pelvis centre. The controller needs the body axis to choose head side.
+        left, right, left_pelvis, right_pelvis = self.patient_points_world
+        shoulder_mid_x, shoulder_mid_y = (left.x_m + right.x_m) / 2.0, (left.y_m + right.y_m) / 2.0
+        pelvis_mid_x, pelvis_mid_y = (left_pelvis.x_m + right_pelvis.x_m) / 2.0, (left_pelvis.y_m + right_pelvis.y_m) / 2.0
+        # The synthetic body uses a head 0.55 m opposite the pelvis.
+        head_x, head_y = 2.0 * shoulder_mid_x - pelvis_mid_x, 2.0 * shoulder_mid_y - pelvis_mid_y
+        for point_world in (left, right, Point3D(head_x, head_y, left.z_m), Point3D(pelvis_mid_x, pelvis_mid_y, left_pelvis.z_m)):
             pose = Pose()
             pose.position.x, pose.position.y, pose.position.z = point_world.x_m, point_world.y_m, point_world.z_m
             shoulder_line.poses.append(pose)

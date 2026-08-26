@@ -1,4 +1,4 @@
-"""Freeze one real camera measurement as a fixed Gazebo TRT target."""
+"""Freeze one real camera measurement as a fixed Gazebo hybrid-controller target."""
 
 from __future__ import annotations
 
@@ -33,17 +33,17 @@ class CameraSnapshotToGazebo(Node):
         self.visuals_placed = False
         self.placement_attempt_in_progress = False
         self.timer = self.create_timer(0.1, self.publish_snapshot)
-        self.get_logger().info("Waiting for one real /shoulder_line_camera measurement; it will then be frozen for Gazebo TRT.")
+        self.get_logger().info("Waiting for one real /shoulder_line_camera body measurement; it will then be frozen for Gazebo.")
 
     def on_camera_line(self, message: PoseArray) -> None:
-        if self.snapshot is not None or len(message.poses) < 2:
+        if self.snapshot is not None or len(message.poses) < 4:
             return
         snapshot = PoseArray()
         snapshot.header.stamp = self.get_clock().now().to_msg()
         snapshot.header.frame_id = "odom"
-        for camera_pose in message.poses[:2]:
+        for camera_pose in message.poses[:4]:
             # RealSense optical: x=right, y=down, z=forward.  Gazebo ground:
-            # x=forward, y=left.  Height is not used by the planar TRT solver.
+            # x=forward, y=left. Height is not used by the planar controller.
             forward, left = camera_pose.position.z, -camera_pose.position.x
             c, s = math.cos(self.camera_yaw), math.sin(self.camera_yaw)
             pose = Pose()

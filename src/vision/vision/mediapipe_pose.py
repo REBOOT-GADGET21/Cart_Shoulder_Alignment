@@ -6,6 +6,9 @@ from __future__ import annotations
 class MediaPipeShoulderDetector:
     LEFT_SHOULDER = 11
     RIGHT_SHOULDER = 12
+    NOSE = 0
+    LEFT_HIP = 23
+    RIGHT_HIP = 24
 
     def __init__(self, detection_confidence: float = 0.5, tracking_confidence: float = 0.5):
         # This explicit import matches the installed MediaPipe 0.10.x setup
@@ -25,7 +28,10 @@ class MediaPipeShoulderDetector:
         if not result.pose_landmarks:
             return None
         landmarks = result.pose_landmarks.landmark
-        return landmarks[self.LEFT_SHOULDER], landmarks[self.RIGHT_SHOULDER]
+        # The controller uses shoulders plus a head/pelvis body axis to select
+        # the head-side normal. Keep the order stable for /shoulder_line.
+        return (landmarks[self.LEFT_SHOULDER], landmarks[self.RIGHT_SHOULDER],
+                landmarks[self.NOSE], landmarks[self.LEFT_HIP], landmarks[self.RIGHT_HIP])
 
     def draw_landmarks(self, image) -> None:
         """Overlay the normal MediaPipe skeleton for a human-readable preview."""
