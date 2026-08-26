@@ -1,3 +1,5 @@
+// 현재 사용하는 TRT 정렬 controller
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -124,6 +126,7 @@ private:
   void translate_to_intersection(const sac::Vec2 & midpoint, const sac::Vec2 & normal, const sac::Vec2 & heading)
   {
     const auto intersection = sac::intersect_lines(robot_->position, heading, midpoint, normal, parallel_epsilon_);
+    // R이 너무 멀다면 fallback 회전-이동 방식을 바꾸는 안정/ 현실 제한값을 설정
     if (!intersection || std::abs(intersection->first_t) > max_valid_t_m_) {
       transition_to(State::FALLBACK_ROTATE_TO_R);
       return;
