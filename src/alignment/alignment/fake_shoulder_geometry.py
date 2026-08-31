@@ -17,6 +17,15 @@ class FakeShoulderLine:
     right: Point3D
 
 
+@dataclass(frozen=True)
+class FakeBodyReference:
+    """Synthetic head/pelvis centres derived from the configured shoulder line."""
+
+    shoulder_line: FakeShoulderLine
+    head: Point3D
+    pelvis: Point3D
+
+
 def fake_shoulder_line_from_config(config: Mapping[str, object]) -> FakeShoulderLine:
     """중심·폭·반시계 양수 각도 정의를 기존 left/right 순서로 변환한다."""
 
@@ -38,3 +47,24 @@ def fake_shoulder_line_from_config(config: Mapping[str, object]) -> FakeShoulder
         left=Point3D(center_x_m + offset_x_m, center_y_m + offset_y_m, 0.25),
         right=Point3D(center_x_m - offset_x_m, center_y_m - offset_y_m, 0.25),
     )
+
+
+def fake_body_reference_from_config(config: Mapping[str, object]) -> FakeBodyReference:
+    """Derive a directed body axis; positive sign puts the head on the CCW shoulder normal."""
+
+    shoulder_line = fake_shoulder_line_from_config(config)
+    center_x = (shoulder_line.left.x_m + shoulder_line.right.x_m) / 2.0
+    center_y = (shoulder_line.left.y_m + shoulder_line.right.y_m) / 2.0
+    dx = shoulder_line.right.x_m - shoulder_line.left.x_m
+    dy = shoulder_line.right.y_m - shoulder_line.left.y_m
+    length = math.hypot(dx, dy)
+    normal_x, normal_y = -dy / length, dx / length
+    head_sign = float(config.get("gazebo_fake_head_normal_sign", -1.0))
+    body_offset_m = float(config.get("gazebo_fake_body_axis_offset_m", 0.55))
+    if head_sign not in (-1.0, 1.0) or body_offset_m <= 0.0:
+        raise ValueError("gazebo_fake_head_normal_sign must be -1 or 1 and body axis offset must be positive")
+    head = Point3D(center_x + head_sign * body_offset_m * normal_x,
+                   center_y + head_sign * body_offset_m * normal_y, shoulder_line.left.z_m)
+    pelvis = Point3D(center_x - head_sign * body_offset_m * normal_x,
+                     center_y - head_sign * body_offset_m * normal_y, shoulder_line.left.z_m)
+    return FakeBodyReference(shoulder_line, head, pelvis)

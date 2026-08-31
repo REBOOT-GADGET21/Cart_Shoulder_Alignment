@@ -18,7 +18,7 @@ from geometry.frame_transform import transform_base_point_to_optical
 from geometry.vector_math import Point3D
 
 from .calibration import load_alignment_settings
-from .fake_shoulder_geometry import fake_shoulder_line_from_config
+from .fake_shoulder_geometry import fake_body_reference_from_config
 
 
 def _load_fake_patient_landmarks() -> tuple[Point3D, Point3D, Point3D, Point3D]:
@@ -29,17 +29,10 @@ def _load_fake_patient_landmarks() -> tuple[Point3D, Point3D, Point3D, Point3D]:
         from ament_index_python.packages import get_package_share_directory
         path = Path(get_package_share_directory("alignment")) / "config" / "params_setting.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
-    shoulder_line = fake_shoulder_line_from_config(raw)
-    left, right = shoulder_line.left, shoulder_line.right
-
-    shoulder_dx, shoulder_dy = right.x_m - left.x_m, right.y_m - left.y_m
-    if math.hypot(shoulder_dx, shoulder_dy) < 0.05:
-        raise ValueError("Fake shoulder positions must be at least 0.05 m apart")
-    body_yaw = math.atan2(shoulder_dy, shoulder_dx) + math.pi / 2.0
-    center_x, center_y = (left.x_m + right.x_m) / 2.0, (left.y_m + right.y_m) / 2.0
-    # 골반은 어깨선 뒤쪽 0.55 m를 유지해, 각도 변경 때도 일관된 가짜 신체를 만든다.
-    pelvis_center_x = center_x + 0.55 * math.cos(body_yaw)
-    pelvis_center_y = center_y + 0.55 * math.sin(body_yaw)
+    body = fake_body_reference_from_config(raw)
+    left, right, pelvis = body.shoulder_line.left, body.shoulder_line.right, body.pelvis
+    body_yaw = math.atan2(pelvis.y_m - (left.y_m + right.y_m) / 2.0, pelvis.x_m - (left.x_m + right.x_m) / 2.0)
+    pelvis_center_x, pelvis_center_y = pelvis.x_m, pelvis.y_m
     lateral_x, lateral_y = -math.sin(body_yaw), math.cos(body_yaw)
     return (
         left, right,

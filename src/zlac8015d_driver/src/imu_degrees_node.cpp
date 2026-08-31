@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 
 #include "geometry_msgs/msg/vector3.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -12,6 +13,10 @@ public:
   ImuDegreesNode()
   : Node("imu_degrees")
   {
+    yaw_sign_ = declare_parameter<double>("imu_yaw_sign", 1.0);
+    if (yaw_sign_ != -1.0 && yaw_sign_ != 1.0) {
+      throw std::invalid_argument("imu_yaw_sign must be -1 or 1");
+    }
     publisher_ = create_publisher<geometry_msgs::msg::Vector3>("/imu/deg", 10);
     subscription_ = create_subscription<sensor_msgs::msg::Imu>(
       "/imu/data", rclcpp::SensorDataQoS(),
@@ -40,12 +45,13 @@ private:
     degrees.x = std::atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y)) * kRadToDeg;
     const double pitch_sin = std::clamp(2.0 * (w * y - z * x), -1.0, 1.0);
     degrees.y = std::asin(pitch_sin) * kRadToDeg;
-    degrees.z = std::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) * kRadToDeg;
+    degrees.z = yaw_sign_ * std::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)) * kRadToDeg;
     publisher_->publish(degrees);
   }
 
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subscription_;
   rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr publisher_;
+  double yaw_sign_{};
 };
 
 int main(int argc, char * argv[])

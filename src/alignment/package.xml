@@ -13,6 +13,7 @@
   <depend>tf2_ros</depend>
   <depend>ros_gz_interfaces</depend>
   <exec_depend>geometry</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

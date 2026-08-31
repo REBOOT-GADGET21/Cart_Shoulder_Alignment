@@ -19,12 +19,16 @@ public:
     wheel_radius_m_ = declare_parameter<double>("wheel_radius_m", 0.0);
     wheel_track_m_ = declare_parameter<double>("wheel_track_m", 0.0);
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
-    base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
+    odom_child_frame_ = declare_parameter<std::string>("odom_child_frame", "rear_axle_pivot");
     use_imu_yaw_ = declare_parameter<bool>("use_imu_yaw", true);
     imu_topic_ = declare_parameter<std::string>("imu_topic", "/imu/data");
     imu_timeout_sec_ = declare_parameter<double>("imu_timeout_sec", 0.2);
+    imu_yaw_sign_ = declare_parameter<double>("imu_yaw_sign", 1.0);
     if (wheel_radius_m_ <= 0.0 || wheel_track_m_ <= 0.0) {
       throw std::invalid_argument("wheel_radius_m과 wheel_track_m은 실제 측정값으로 설정해야 합니다");
+    }
+    if (imu_yaw_sign_ != -1.0 && imu_yaw_sign_ != 1.0) {
+      throw std::invalid_argument("imu_yaw_sign must be -1 or 1");
     }
     odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -58,7 +62,9 @@ private:
     // quaternion에서 수평 회전각(yaw)만 추출한다.
     const double sin_yaw = 2.0 * (orientation.w * orientation.z + orientation.x * orientation.y);
     const double cos_yaw = 1.0 - 2.0 * (orientation.y * orientation.y + orientation.z * orientation.z);
-    const double raw_yaw_rad = std::atan2(sin_yaw, cos_yaw);
+    // Some IMU mounting/vendor conventions report a clockwise physical turn
+    // as positive yaw. Convert to ROS planar convention before odometry.
+    const double raw_yaw_rad = imu_yaw_sign_ * std::atan2(sin_yaw, cos_yaw);
     if (!received_imu_baseline_) {
       // 시작 순간을 odom 좌표계의 yaw=0으로 둔다.
       imu_yaw_reference_rad_ = raw_yaw_rad;
@@ -125,7 +131,9 @@ private:
     nav_msgs::msg::Odometry odom;
     odom.header.stamp = stamp;
     odom.header.frame_id = odom_frame_;
-    odom.child_frame_id = base_frame_;
+    // Differential-drive kinematics are defined at the rear wheel midpoint.
+    // base_link is a separate fixed frame ahead of this physical pivot.
+    odom.child_frame_id = odom_child_frame_;
     odom.pose.pose.position.x = x_m_;
     odom.pose.pose.position.y = y_m_;
     odom.pose.pose.orientation.z = std::sin(half_yaw);
@@ -135,7 +143,7 @@ private:
     odom_publisher_->publish(odom);
     geometry_msgs::msg::TransformStamped transform;
     transform.header = odom.header;
-    transform.child_frame_id = base_frame_;
+    transform.child_frame_id = odom_child_frame_;
     transform.transform.translation.x = x_m_;
     transform.transform.translation.y = y_m_;
     transform.transform.rotation = odom.pose.pose.orientation;
@@ -143,10 +151,10 @@ private:
   }
 
   double wheel_radius_m_{}, wheel_track_m_{};
-  std::string odom_frame_, base_frame_;
+  std::string odom_frame_, odom_child_frame_;
   bool use_imu_yaw_{};
   std::string imu_topic_;
-  double imu_timeout_sec_{};
+  double imu_timeout_sec_{}, imu_yaw_sign_{};
   bool received_baseline_{false};
   double previous_left_angle_rad_{}, previous_right_angle_rad_{}, x_m_{}, y_m_{}, yaw_rad_{};
   rclcpp::Time previous_stamp_;

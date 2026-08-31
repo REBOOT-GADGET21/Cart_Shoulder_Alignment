@@ -46,12 +46,14 @@ public:
     target_position_tau_s_ = declare_parameter<double>("hybrid_target_position_tau_s", 0.18);
     target_heading_tau_s_ = declare_parameter<double>("hybrid_target_heading_tau_s", 0.30);
     measurement_timeout_s_ = declare_parameter<double>("measurement_timeout_s", 0.50);
+    odom_timeout_s_ = declare_parameter<double>("odom_timeout_s", 0.25);
 
     shoulder_subscription_ = create_subscription<geometry_msgs::msg::PoseArray>("/shoulder_line", 10,
       [this](geometry_msgs::msg::PoseArray::SharedPtr message) {on_landmarks(*message);});
     odom_subscription_ = create_subscription<nav_msgs::msg::Odometry>("/odom", 20,
       [this](nav_msgs::msg::Odometry::SharedPtr message) {on_odom(*message);});
-    cmd_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+    // Automatic alignment must not masquerade as manual /cmd_vel input.
+    cmd_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/alignment_cmd", 10);
     angle_error_publisher_ = create_publisher<std_msgs::msg::Float32>("/alignment/error_angle_deg", 10);
     aligned_publisher_ = create_publisher<std_msgs::msg::Bool>("/alignment/aligned", 10);
     state_publisher_ = create_publisher<std_msgs::msg::String>("/shoulder_align/state", 10);
@@ -83,6 +85,7 @@ private:
     const auto & q = message.pose.pose.orientation;
     const double yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     robot_ = RobotPose{{{message.pose.pose.position.x, message.pose.pose.position.y}, yaw}, message.header.frame_id};
+    last_odom_time_ = now();
   }
 
   std::optional<sac::Pose2D> raw_goal() const
@@ -118,6 +121,7 @@ private:
   void control_step()
   {
     if (!landmarks_ || !robot_ || (now() - last_landmark_time_).seconds() > measurement_timeout_s_ ||
+      (now() - last_odom_time_).seconds() > odom_timeout_s_ ||
       (!landmarks_->frame_id.empty() && !robot_->frame_id.empty() && landmarks_->frame_id != robot_->frame_id)) {
       publish_stop(); publish_state(); publish_aligned_status(); return;
     }
@@ -167,11 +171,11 @@ private:
   void publish_velocity(const double v, const double w) {geometry_msgs::msg::Twist m; m.linear.x = v; m.angular.z = w; cmd_publisher_->publish(m);}
   void publish_stop() {publish_velocity(0.0, 0.0);}
 
-  double stop_distance_m_{}, platform_length_m_{}, hold_confirm_s_{}, target_position_tau_s_{}, target_heading_tau_s_{}, measurement_timeout_s_{};
+  double stop_distance_m_{}, platform_length_m_{}, hold_confirm_s_{}, target_position_tau_s_{}, target_heading_tau_s_{}, measurement_timeout_s_{}, odom_timeout_s_{};
   sac::HybridControlParams params_;
   sac::HybridMode mode_{sac::HybridMode::POSITION};
   std::optional<Landmarks> landmarks_; std::optional<RobotPose> robot_; std::optional<sac::Pose2D> filtered_goal_;
-  rclcpp::Time last_landmark_time_{0, 0, RCL_ROS_TIME}, last_goal_filter_time_{0, 0, RCL_ROS_TIME}, hold_candidate_since_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_landmark_time_{0, 0, RCL_ROS_TIME}, last_odom_time_{0, 0, RCL_ROS_TIME}, last_goal_filter_time_{0, 0, RCL_ROS_TIME}, hold_candidate_since_{0, 0, RCL_ROS_TIME};
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr shoulder_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;

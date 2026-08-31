@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
-from alignment.fake_shoulder_geometry import fake_shoulder_line_from_config
+from alignment.fake_shoulder_geometry import fake_body_reference_from_config
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess, SetEnvironmentVariable, TimerAction
 from launch_ros.actions import Node
@@ -27,14 +27,14 @@ def generate_launch_description() -> LaunchDescription:
     if not config_file.exists():
         config_file = Path(get_package_share_directory("alignment")) / "config" / "params_setting.json"
     config = json.loads(config_file.read_text(encoding="utf-8"))
-    shoulder_line = fake_shoulder_line_from_config(config)
+    body_reference = fake_body_reference_from_config(config)
+    shoulder_line = body_reference.shoulder_line
     left_x, left_y = shoulder_line.left.x_m, shoulder_line.left.y_m
     right_x, right_y = shoulder_line.right.x_m, shoulder_line.right.y_m
-    body_yaw = math.atan2(right_y - left_y, right_x - left_x) + math.pi / 2.0
     shoulder_center_x, shoulder_center_y = (left_x + right_x) / 2.0, (left_y + right_y) / 2.0
+    body_yaw = math.atan2(body_reference.pelvis.y_m - shoulder_center_y, body_reference.pelvis.x_m - shoulder_center_x)
     # In person_walking/model.sdf, shoulder centre is local (-0.55, 0).
-    patient_x = shoulder_center_x + 0.55 * math.cos(body_yaw)
-    patient_y = shoulder_center_y + 0.55 * math.sin(body_yaw)
+    patient_x, patient_y = body_reference.pelvis.x_m, body_reference.pelvis.y_m
     existing_resource_path = os.environ.get("GZ_SIM_RESOURCE_PATH", "")
     resource_path = os.pathsep.join([models_dir, existing_resource_path]).rstrip(os.pathsep)
 

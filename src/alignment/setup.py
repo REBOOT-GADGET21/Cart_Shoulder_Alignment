@@ -23,6 +23,8 @@ setup(
         "console_scripts": [
             "alignment_node=alignment.alignment_node:main",
             "fake_body_landmarks_publisher=alignment.fake_shoulder_publisher:main",
+            "fixed_body_landmark_publisher=alignment.fixed_body_landmark_publisher:main",
+            "fixed_body_debug_plot=alignment.fixed_body_debug_plot:main",
             "gazebo_ground_truth_publisher=alignment.gazebo_ground_truth_publisher:main",
             "camera_snapshot_to_gazebo=alignment.camera_snapshot_to_gazebo:main",
         ],

@@ -8,8 +8,12 @@ find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
+add_library(witmotion_sdk STATIC third_party/witmotion/wit_c_sdk.c)
+target_include_directories(witmotion_sdk PUBLIC third_party/witmotion)
+
 add_executable(hwt9053_imu_node src/hwt9053_imu_node.cpp)
-target_include_directories(hwt9053_imu_node PRIVATE include)
+target_include_directories(hwt9053_imu_node PRIVATE include third_party/witmotion)
+target_link_libraries(hwt9053_imu_node witmotion_sdk)
 ament_target_dependencies(hwt9053_imu_node rclcpp sensor_msgs geometry_msgs std_srvs)
 
 add_executable(imu_static_tf_node src/imu_static_tf_node.cpp)
