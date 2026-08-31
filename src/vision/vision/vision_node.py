@@ -1,7 +1,9 @@
-"""Publish filtered D435/MediaPipe shoulders in the odom (rear-pivot) world frame."""
+"""Publish filtered D435 pose landmarks in the odom (rear-pivot) frame."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import time
 
 import rclpy
@@ -15,12 +17,15 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from .camera_types import CameraIntrinsics
 from .deprojection import deproject_pixel, robust_depth_m
 from .landmark_filter import LandmarkFilter
-from .mediapipe_pose import MediaPipeShoulderDetector
-
-
-class RealSenseMediaPipePoseNode(Node):
+class RealSensePoseNode(Node):
     def __init__(self) -> None:
-        super().__init__("realsense_mediapipe_pose")
+        super().__init__("realsense_pose")
+        shared_config = self._load_shared_config()
+        self.declare_parameter("pose_backend", shared_config.get("vision_pose_backend", "mediapipe"))
+        self.declare_parameter("yolo_model_path", shared_config.get("yolo_pose_model_path", "yolo11n-pose.pt"))
+        self.declare_parameter("yolo_person_confidence", shared_config.get("yolo_pose_person_confidence", 0.45))
+        self.declare_parameter("yolo_keypoint_confidence", shared_config.get("yolo_pose_keypoint_confidence", 0.50))
+        self.declare_parameter("yolo_device", shared_config.get("yolo_pose_device", ""))
         self.declare_parameter("visibility_threshold", 0.65)
         self.declare_parameter("filter_alpha", 0.35)
         self.declare_parameter("median_window", 7)
@@ -43,6 +48,7 @@ class RealSenseMediaPipePoseNode(Node):
         self.color_width = int(self.get_parameter("color_width").value)
         self.color_height = int(self.get_parameter("color_height").value)
         self.fps = int(self.get_parameter("fps").value)
+        self.pose_backend = str(self.get_parameter("pose_backend").value).strip().lower()
         self.close_requested = False
         self.shoulder_pub = self.create_publisher(PoseArray, "/shoulder_line", 10)
         self.camera_shoulder_pub = self.create_publisher(PoseArray, "/shoulder_line_camera", 10)
@@ -62,6 +68,32 @@ class RealSenseMediaPipePoseNode(Node):
         self.timer = self.create_timer(0.0 + 1.0 / 30.0, self.process_frame)
         self._start_camera()
 
+    @staticmethod
+    def _load_shared_config() -> dict:
+        workspace_path = Path.cwd() / "src" / "params_setting.json"
+        if workspace_path.exists():
+            return json.loads(workspace_path.read_text(encoding="utf-8"))
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            installed = Path(get_package_share_directory("vision")) / "config" / "params_setting.json"
+            return json.loads(installed.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _create_detector(self):
+        if self.pose_backend == "mediapipe":
+            from .mediapipe_pose import MediaPipePoseDetector
+            return MediaPipePoseDetector()
+        if self.pose_backend == "yolo11n_pose":
+            from .yolo11_pose import Yolo11nPoseDetector
+            return Yolo11nPoseDetector(
+                model_path=str(self.get_parameter("yolo_model_path").value),
+                person_confidence=float(self.get_parameter("yolo_person_confidence").value),
+                keypoint_confidence=float(self.get_parameter("yolo_keypoint_confidence").value),
+                device=str(self.get_parameter("yolo_device").value),
+            )
+        raise ValueError("pose_backend must be 'mediapipe' or 'yolo11n_pose'")
+
     def _start_camera(self) -> None:
         try:
             import pyrealsense2 as rs
@@ -76,12 +108,14 @@ class RealSenseMediaPipePoseNode(Node):
             self.align = rs.align(rs.stream.color)
             depth_sensor = profile.get_device().first_depth_sensor()
             self.depth_scale = depth_sensor.get_depth_scale()
-            self.detector = MediaPipeShoulderDetector()
+            self.detector = self._create_detector()
             self.get_logger().info(
-                "D435 + MediaPipe started. Read /shoulder_line_camera now: it is the actual filtered "
+                f"D435 + {self.pose_backend} started. Read /shoulder_line_camera: it is the filtered "
                 "camera measurement (pose[0]=left, pose[1]=right). No platform is required.")
         except Exception as exc:
-            self.get_logger().error(f"Could not start D435/MediaPipe: {exc}")
+            self.get_logger().error(f"Could not start D435/{self.pose_backend}: {exc}")
+            if self.pipeline:
+                self.pipeline.stop()
             self.pipeline = None
 
     def _publish_valid(self, valid: bool) -> None:
@@ -105,7 +139,7 @@ class RealSenseMediaPipePoseNode(Node):
                 cv2.putText(view, text, (text_x, text_y + 17 * line_index),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
         cv2.putText(view, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.imshow("D435 MediaPipe shoulder measurement (q to close)", view)
+        cv2.imshow(f"D435 {self.pose_backend} pose measurement (q to close)", view)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             self.close_requested = True
 
@@ -166,7 +200,7 @@ class RealSenseMediaPipePoseNode(Node):
             self.error_x_pub.publish(Float32(data=shoulder_center_u - intrinsics.width / 2.0))
             self._preview(bgr, pixels[:2], points[:2], "Camera coordinates: x=right, y=down, z=forward")
             if self.close_requested:
-                self.get_logger().info("Preview closed with q; stopping D435/MediaPipe node")
+                self.get_logger().info(f"Preview closed with q; stopping D435/{self.pose_backend} node")
                 rclpy.shutdown(); return
             if time.monotonic() - self.last_measurement_notice_s >= 1.0:
                 self.last_measurement_notice_s = time.monotonic()
@@ -210,7 +244,7 @@ class RealSenseMediaPipePoseNode(Node):
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = RealSenseMediaPipePoseNode()
+    node = RealSensePoseNode()
     try:
         rclpy.spin(node)
     finally:

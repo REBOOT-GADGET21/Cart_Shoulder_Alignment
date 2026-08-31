@@ -62,7 +62,7 @@ def generate_launch_description() -> LaunchDescription:
         # Only supplies Gazebo odom/TF; it must not overwrite the frozen real target.
         Node(package="alignment", executable="gazebo_ground_truth_publisher", parameters=[{"publish_shoulders": False}], output="screen"),
         Node(
-            package="vision", executable="realsense_mediapipe_pose",
+            package="vision", executable="realsense_pose",
             parameters=[{"show_preview": True, "color_width": 1280, "color_height": 720, "fps": 30}],
             output="screen",
         ),

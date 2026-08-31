@@ -1,1 +1,1 @@
-"""Reserved for later RGB-D and MediaPipe phases."""
+"""Shared RGB-D pose pipeline with isolated MediaPipe and YOLO backends."""

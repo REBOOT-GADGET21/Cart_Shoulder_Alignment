@@ -1,14 +1,18 @@
-Ubuntu 버전: Ubuntu 22.04.5 LTS
-ROS 2버전: Humble 
-Python 버전: python 3.10.20
+# Python 3.10 dependencies used directly by this repository.
+# ROS 2 packages and native libraries are installed separately; see README.md.
 
-Gazebo 버전: Gazebo Sim, version 8.14.0
-    Copyright (C) 2018 Open Source Robotics Foundation.
-    Released under the Apache 2.0 License.
+# D435 RGB-D input. The current development machine uses librealsense 2.55.1.
+pyrealsense2>=2.55,<2.56
 
-RealSense SDK 설치 여부: 2.55.1
-MediaPipe 설치: 0.10.14로 설치 되어있음
-colcon 빌드 확인: 설치 되어있지 않음
+# Selectable pose backends.
+mediapipe==0.10.14
+ultralytics==8.4.135
 
-pip install "pytest<8.0.0" "pluggy<1.4.0" jinja2 typeguard pyyaml catkin_pkg rosdistro empy numpy lark
-rosdep update
+# Imported directly by vision, plotting, and measurement-analysis tools.
+numpy==2.2.6
+opencv-contrib-python==5.0.0.93
+matplotlib==3.10.9
+pandas==2.3.3
+
+# Repository Python tests.
+pytest==7.4.4

@@ -3,6 +3,8 @@
 CSV columns: stamp_s,left_x,left_y,right_x,right_y,ref_left_x,ref_left_y,
 ref_right_x,ref_right_y,processing_latency_ms.  The reference columns are
 the tape/marker measurements in the same odom frame and can be constant.
+
+jitter, 오차를 분석하는 코드
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from pathlib import Path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compute D435/MediaPipe shoulder error and jitter.")
+    parser = argparse.ArgumentParser(description="Compute backend-independent D435 pose error and jitter.")
     parser.add_argument("csv", help="Rosbag-exported measurement CSV")
     parser.add_argument("--label", default="trial", help="e.g. distance_2m_yaw_30")
     parser.add_argument("--output-dir", default="shoulder_measurement_results")

@@ -52,6 +52,15 @@
   "camera_pitch_down_rad": 0.6981317007977318,
   "camera_yaw_rad": 0.0,
 
+  "__comment_vision_backend": "pose 인식기는 mediapipe 또는 yolo11n_pose 중 하나만 선택",
+  "__comment_vision_backend": "mediapipe = mediapipe_pose",
+  "__comment_vision_backend": "yolo11n_pose = yolo11n_pose",
+  "vision_pose_backend": "yolo11n_pose",
+  "yolo_pose_model_path": "yolo11n-pose.pt",
+  "yolo_pose_person_confidence": 0.45,
+  "yolo_pose_keypoint_confidence": 0.50,
+  "yolo_pose_device": "",
+
   "__commet": "shoulder_align 위치 제어의 비례 게인, shoulder_align 회전 제어의 비례 게인",
   "alignment_position_kp": 0.35,
   "alignment_yaw_kp": 0.8,

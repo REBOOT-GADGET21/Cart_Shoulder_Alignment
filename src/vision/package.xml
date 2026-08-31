@@ -2,7 +2,7 @@
 <package format="3">
   <name>vision</name>
   <version>0.0.1</version>
-  <description>RealSense D435, MediaPipe Pose, shoulder filtering, and RViz tools.</description>
+  <description>RealSense D435 pose pipeline with selectable MediaPipe and YOLO11n-pose backends.</description>
   <maintainer email="user@example.com">user</maintainer>
   <license>Apache-2.0</license>
   <depend>geometry_msgs</depend>
