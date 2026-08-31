@@ -11,6 +11,7 @@ ultralytics==8.4.135
 # Imported directly by vision, plotting, and measurement-analysis tools.
 numpy==2.2.6
 opencv-contrib-python==5.0.0.93
+opencv-python==5.0.0.93
 matplotlib==3.10.9
 pandas==2.3.3
 
