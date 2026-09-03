@@ -7,3 +7,5 @@ src/WitHighModbus_HWT9073485/
 *.pt
 bus.jpg
 fixed_body_alignment_debug.png
+*.png
+*.jpg

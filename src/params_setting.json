@@ -54,7 +54,7 @@
 
   "__comment_vision_backend": "pose 인식기는 mediapipe 또는 yolo11n_pose 중 하나만 선택",
   "__comment_vision_backend": "mediapipe = mediapipe_pose",
-  "__comment_vision_backend": "yolo11n_pose = yolo11n_pose",
+  "__comment_vision_backend": "yolo11n_pose = yolo11n_pose, yolo_pose_model_path: yolo11n-pose.pt, 기본값",
   "vision_pose_backend": "yolo11n_pose",
   "yolo_pose_model_path": "yolo11n-pose.pt",
   "yolo_pose_person_confidence": 0.45,
