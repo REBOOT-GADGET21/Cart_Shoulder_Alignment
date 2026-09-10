@@ -26,6 +26,7 @@ setup(
             "fixed_body_landmark_publisher=alignment.fixed_body_landmark_publisher:main",
             "fixed_body_debug_plot=alignment.fixed_body_debug_plot:main",
             "gazebo_ground_truth_publisher=alignment.gazebo_ground_truth_publisher:main",
+            "gazebo_cart_odometry=alignment.gazebo_cart_odometry:main",
             "camera_snapshot_to_gazebo=alignment.camera_snapshot_to_gazebo:main",
         ],
     },

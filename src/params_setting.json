@@ -56,7 +56,7 @@
   "__comment_vision_backend": "mediapipe = mediapipe_pose",
   "__comment_vision_backend": "yolo11n_pose = yolo11n_pose, yolo_pose_model_path: yolo11n-pose.pt, 기본값",
   "vision_pose_backend": "yolo11n_pose",
-  "yolo_pose_model_path": "yolo11n-pose.pt",
+  "yolo_pose_model_path": "result_folder_4/best.pt",
   "yolo_pose_person_confidence": 0.45,
   "yolo_pose_keypoint_confidence": 0.50,
   "yolo_pose_device": "",
@@ -93,7 +93,7 @@
   "gazebo_fake_shoulder_center_x_m": 3.0,
   "gazebo_fake_shoulder_center_y_m": 0.0,
   "gazebo_fake_shoulder_width_m": 0.509,
-  "gazebo_fake_shoulder_angle_deg": 90.0,
+  "gazebo_fake_shoulder_angle_deg": 180.0,
   "gazebo_fake_body_axis_offset_m": 0.55,
-  "gazebo_fake_head_normal_sign": -1
+  "gazebo_fake_head_normal_sign": 1
 }

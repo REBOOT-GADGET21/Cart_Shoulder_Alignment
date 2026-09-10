@@ -16,6 +16,23 @@ class YoloPoseLandmark:
     visibility: float
 
 
+@dataclass(frozen=True)
+class PoseLayout:
+    """Keypoint indices for one supported YOLO pose skeleton."""
+
+    name: str
+    keypoint_count: int
+    left_eye: int
+    right_eye: int
+    mouth: int
+    left_shoulder: int
+    right_shoulder: int
+    left_hip: int
+    right_hip: int
+    face_indices: tuple[int, ...]
+    chest: int | None = None
+
+
 def fuse_face_keypoints(
     keypoints: Iterable[YoloPoseLandmark], confidence_threshold: float
 ) -> YoloPoseLandmark | None:
@@ -40,18 +57,42 @@ def fuse_face_keypoints(
 
 
 class Yolo11nPoseDetector:
-    """Return shoulders, fused head, and hips from a COCO-order YOLO pose."""
+    """Adapter for either the cart's custom or the standard COCO YOLO pose model.
 
-    NOSE = 0
-    LEFT_EYE = 1
-    RIGHT_EYE = 2
-    LEFT_EAR = 3
-    RIGHT_EAR = 4
-    LEFT_SHOULDER = 5
-    RIGHT_SHOULDER = 6
-    LEFT_HIP = 11
-    RIGHT_HIP = 12
-    FACE_INDICES = (NOSE, LEFT_EYE, RIGHT_EYE, LEFT_EAR, RIGHT_EAR)
+    The skeleton is selected from the loaded model's keypoint count, not from
+    the file name.  This lets ``yolo11n-pose.pt`` (17 COCO keypoints) and the
+    cart's ``best.pt`` (8 custom keypoints) share the same ROS launch path.
+    """
+
+    CUSTOM_LAYOUT = PoseLayout(
+        name="custom_cart_8",
+        keypoint_count=8,
+        left_eye=0, right_eye=1, mouth=2,
+        left_shoulder=3, right_shoulder=4,
+        left_hip=5, right_hip=6,
+        face_indices=(0, 1, 2),
+        chest=7,
+    )
+    COCO_LAYOUT = PoseLayout(
+        name="coco_17",
+        keypoint_count=17,
+        nose=0, left_eye=1, right_eye=2,
+        left_shoulder=5, right_shoulder=6,
+        left_hip=11, right_hip=12,
+        face_indices=(0, 1, 2, 3, 4),
+    )
+
+    @classmethod
+    def layout_for_keypoint_count(cls, keypoint_count: int) -> PoseLayout:
+        if keypoint_count == cls.CUSTOM_LAYOUT.keypoint_count:
+            return cls.CUSTOM_LAYOUT
+        if keypoint_count == cls.COCO_LAYOUT.keypoint_count:
+            return cls.COCO_LAYOUT
+        raise ValueError(
+            "Unsupported YOLO pose skeleton: expected 8 custom cart keypoints "
+            "or 17 COCO keypoints, got "
+            f"{keypoint_count}."
+        )
 
     def __init__(
         self,
@@ -68,6 +109,10 @@ class Yolo11nPoseDetector:
                 "Install it in the ROS Python environment before starting this node."
             ) from exc
         self._model = YOLO(model_path)
+        model_keypoint_shape = getattr(getattr(self._model, "model", None), "kpt_shape", None)
+        if model_keypoint_shape is None:
+            raise ValueError("Could not determine the loaded YOLO pose model's keypoint shape.")
+        self._layout = self.layout_for_keypoint_count(int(model_keypoint_shape[0]))
         self._person_confidence = person_confidence
         self._keypoint_confidence = keypoint_confidence
         self._device = device
@@ -77,6 +122,34 @@ class Yolo11nPoseDetector:
     def _landmark(xyn, confidence, index: int) -> YoloPoseLandmark:
         return YoloPoseLandmark(
             float(xyn[index][0]), float(xyn[index][1]), float(confidence[index]))
+
+    @staticmethod
+    def _estimated_chest(
+        left_shoulder: YoloPoseLandmark,
+        right_shoulder: YoloPoseLandmark,
+        left_hip: YoloPoseLandmark,
+        right_hip: YoloPoseLandmark,
+    ) -> YoloPoseLandmark:
+        """Estimate a chest point for COCO, which has no chest keypoint.
+
+        The ROS body-axis validation consumes a face, chest, and pelvis line.
+        The custom model supplies chest directly; for the standard 17-point
+        COCO model, use the midpoint between shoulder and hip centres.
+        """
+        shoulder_x = (left_shoulder.x + right_shoulder.x) / 2.0
+        shoulder_y = (left_shoulder.y + right_shoulder.y) / 2.0
+        hip_x = (left_hip.x + right_hip.x) / 2.0
+        hip_y = (left_hip.y + right_hip.y) / 2.0
+        return YoloPoseLandmark(
+            x=(shoulder_x + hip_x) / 2.0,
+            y=(shoulder_y + hip_y) / 2.0,
+            visibility=min(
+                left_shoulder.visibility,
+                right_shoulder.visibility,
+                left_hip.visibility,
+                right_hip.visibility,
+            ),
+        )
 
     def detect(self, rgb_image):
         predict_args = {
@@ -103,12 +176,17 @@ class Yolo11nPoseDetector:
         if result.boxes is not None and result.boxes.conf is not None:
             box_confidences = result.boxes.conf.detach().cpu().numpy()
 
-        # Prefer the person with reliable shoulders and hips. This prevents a
-        # high-confidence partial bystander from replacing the target body.
+        # Prefer a complete body. Shoulders and hips identify a usable body;
+        # face points are evaluated separately because ears can be occluded in
+        # a valid COCO pose.
         best_index, best_score = None, -math.inf
-        required = (self.LEFT_SHOULDER, self.RIGHT_SHOULDER, self.LEFT_HIP, self.RIGHT_HIP)
+        layout = self._layout
+        required = (
+            layout.left_shoulder, layout.right_shoulder,
+            layout.left_hip, layout.right_hip,
+        )
         for index, person_confidences in enumerate(confidences):
-            if len(person_confidences) <= self.RIGHT_HIP:
+            if len(person_confidences) < layout.keypoint_count:
                 continue
             core_score = min(float(person_confidences[key]) for key in required)
             box_score = float(box_confidences[index]) if box_confidences is not None else 1.0
@@ -119,25 +197,35 @@ class Yolo11nPoseDetector:
             return None
 
         xyn, confidence = normalized[best_index], confidences[best_index]
-        face = [self._landmark(xyn, confidence, index) for index in self.FACE_INDICES]
+        face = [self._landmark(xyn, confidence, index) for index in layout.face_indices]
         head = fuse_face_keypoints(face, self._keypoint_confidence)
         if head is None:
             return None
-        return (
-            self._landmark(xyn, confidence, self.LEFT_SHOULDER),
-            self._landmark(xyn, confidence, self.RIGHT_SHOULDER),
-            head,
-            self._landmark(xyn, confidence, self.LEFT_HIP),
-            self._landmark(xyn, confidence, self.RIGHT_HIP),
+        left_shoulder = self._landmark(xyn, confidence, layout.left_shoulder)
+        right_shoulder = self._landmark(xyn, confidence, layout.right_shoulder)
+        left_hip = self._landmark(xyn, confidence, layout.left_hip)
+        right_hip = self._landmark(xyn, confidence, layout.right_hip)
+        chest = (
+            self._landmark(xyn, confidence, layout.chest)
+            if layout.chest is not None
+            else self._estimated_chest(left_shoulder, right_shoulder, left_hip, right_hip)
         )
+        # Keep one stable ROS contract for both models:
+        # left shoulder, right shoulder, head, left hip, right hip, chest.
+        return left_shoulder, right_shoulder, head, left_hip, right_hip, chest
 
     def draw_landmarks(self, image) -> None:
         if self._last_result is None:
             return
         annotated = self._last_result.plot()
         if annotated.shape == image.shape:
-            image[:] = annotated
+            # ``detect`` receives RGB (the D435/OpenCV frame is converted
+            # before inference), and Ultralytics plots on that RGB image.
+            # ``image`` is subsequently displayed by cv2.imshow, which expects
+            # BGR.  Convert only this preview result back to BGR; inference and
+            # all landmark coordinates remain unchanged.
+            import cv2
+            image[:] = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
 
     def close(self) -> None:
         """Ultralytics owns no persistent camera resource here."""
-

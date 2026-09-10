@@ -61,6 +61,7 @@ class RealSensePoseNode(Node):
         self.left_filter, self.right_filter = LandmarkFilter(alpha, window, outlier), LandmarkFilter(alpha, window, outlier)
         self.head_filter = LandmarkFilter(alpha, window, outlier)
         self.left_hip_filter, self.right_hip_filter = LandmarkFilter(alpha, window, outlier), LandmarkFilter(alpha, window, outlier)
+        self.chest_filter = LandmarkFilter(alpha, window, outlier)
         self.pipeline = None
         self.detector = None
         self.last_tf_notice_s = 0.0
@@ -169,7 +170,10 @@ class RealSensePoseNode(Node):
             raw_depth = np.asanyarray(depth.get_data())
             points = []
             pixels = []
-            for landmark, filt in zip(found, (self.left_filter, self.right_filter, self.head_filter, self.left_hip_filter, self.right_hip_filter)):
+            for landmark, filt in zip(found, (
+                self.left_filter, self.right_filter, self.head_filter,
+                self.left_hip_filter, self.right_hip_filter, self.chest_filter,
+            )):
                 u, v = round(landmark.x * intrinsics.width), round(landmark.y * intrinsics.height)
                 depth_m = robust_depth_m(raw_depth, u, v, self.depth_scale, self.depth_radius)
                 point = deproject_pixel(intrinsics, u, v, depth_m) if depth_m else None
@@ -185,6 +189,20 @@ class RealSensePoseNode(Node):
                 (points[3].y + points[4].y) / 2.0,
                 (points[3].z + points[4].z) / 2.0,
             )
+            # The face -> chest -> pelvis direction identifies the person's
+            # shoulder/face side versus leg side.  Reject swapped or malformed
+            # poses before they can reverse the target-side normal downstream.
+            face_to_chest = (
+                points[5].x - points[2].x, points[5].y - points[2].y, points[5].z - points[2].z,
+            )
+            chest_to_pelvis = (
+                pelvis.x - points[5].x, pelvis.y - points[5].y, pelvis.z - points[5].z,
+            )
+            if sum(a * b for a, b in zip(face_to_chest, chest_to_pelvis)) <= 1.0e-4:
+                self._preview(bgr, [], [], "Invalid face-chest-pelvis body axis")
+                self.camera_valid_pub.publish(Bool(data=False))
+                self._publish_valid(False)
+                return
             output_points = [points[0], points[1], points[2], pelvis]
             camera_message = PoseArray()
             camera_message.header.stamp = self.get_clock().now().to_msg()

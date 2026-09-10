@@ -1,4 +1,4 @@
-"""Run Hybrid Lyapunov control in Gazebo against one real D435/MediaPipe body sample."""
+"""Run Gazebo cart control from live D435 custom-pose measurements."""
 
 import json
 from pathlib import Path
@@ -59,12 +59,12 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[shoulder_align_parameters],
             output="screen",
         ),
-        # Only supplies Gazebo odom/TF; it must not overwrite the frozen real target.
-        Node(package="alignment", executable="gazebo_ground_truth_publisher", parameters=[{"publish_shoulders": False}], output="screen"),
+        # Gazebo contributes only cart odometry.  It never publishes synthetic
+        # shoulders, so /shoulder_line comes exclusively from the D435 node.
+        Node(package="alignment", executable="gazebo_cart_odometry", output="screen"),
         Node(
             package="vision", executable="realsense_pose",
             parameters=[{"show_preview": True, "color_width": 1280, "color_height": 720, "fps": 30}],
             output="screen",
         ),
-        Node(package="alignment", executable="camera_snapshot_to_gazebo", output="screen"),
     ])

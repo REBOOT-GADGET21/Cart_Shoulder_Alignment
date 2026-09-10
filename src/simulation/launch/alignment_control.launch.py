@@ -1,6 +1,4 @@
-"""
-Run Gazebo cart, fake body-line/odom inputs, C++ Hybrid Lyapunov alignment, and drive.
-"""
+"""Run Gazebo cart with synthetic body landmarks for controller regression tests."""
 
 import json
 from pathlib import Path
@@ -75,6 +73,9 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[shoulder_align_parameters],
             output="screen",
         ),
+        # Gazebo-only regression input: publishes the configured fixed body
+        # landmarks and matching simulated cart odometry.  Real D435 runs use
+        # realsense_pose instead and do not start this publisher.
         Node(package="alignment", executable="gazebo_ground_truth_publisher", output="screen"),
         Node(package="vision", executable="shoulder_line_markers", condition=IfCondition(LaunchConfiguration("rviz")), output="screen"),
         Node(
