@@ -15,7 +15,7 @@
   "odom_frame": "odom",
   "base_frame": "base_link",
   "rear_axle_frame": "rear_axle_pivot",
-  "use_imu_yaw": false,
+  "use_imu_yaw": true,
   "imu_topic": "/imu/data",
   "imu_timeout_sec": 0.2,
   "imu_yaw_sign": 1.0,
@@ -91,9 +91,9 @@
 
   "__commet": "중심좌표 x, 중심좌표 y, 어깨 폭(불변), 어깨 방향(반시계:+, 시계-)",
   "gazebo_fake_shoulder_center_x_m": 3.0,
-  "gazebo_fake_shoulder_center_y_m": 0.0,
+  "gazebo_fake_shoulder_center_y_m": -0.0,
   "gazebo_fake_shoulder_width_m": 0.509,
-  "gazebo_fake_shoulder_angle_deg": 180.0,
+  "gazebo_fake_shoulder_angle_deg": 45.0,
   "gazebo_fake_body_axis_offset_m": 0.55,
   "gazebo_fake_head_normal_sign": 1
 }

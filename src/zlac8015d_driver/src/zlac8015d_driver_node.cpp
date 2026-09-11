@@ -46,6 +46,7 @@ enum class DriverState
   DISCONNECTED,
   READY,
   COMMAND_TIMEOUT,
+  SAFETY_STOP,
   COMMUNICATION_FAULT,
   DRIVER_FAULT,
 };
@@ -56,6 +57,7 @@ std::string state_name(const DriverState state)
     case DriverState::DISCONNECTED: return "DISCONNECTED";
     case DriverState::READY: return "READY";
     case DriverState::COMMAND_TIMEOUT: return "COMMAND_TIMEOUT";
+    case DriverState::SAFETY_STOP: return "SAFETY_STOP";
     case DriverState::COMMUNICATION_FAULT: return "COMMUNICATION_FAULT";
     case DriverState::DRIVER_FAULT: return "DRIVER_FAULT";
   }
@@ -83,6 +85,9 @@ public:
     command_timeout_sec_ = declare_parameter<double>("command_timeout_sec", 0.5);
     fault_poll_rate_hz_ = declare_parameter<double>("fault_poll_rate_hz", 10.0);
     reconnect_interval_sec_ = declare_parameter<double>("reconnect_interval_sec", 1.0);
+    // 실기 자동정렬 launch에서만 true이다. 안전 신호가 없으면 모터를 Enable하지 않는다.
+    require_safety_enable_ = declare_parameter<bool>("require_safety_enable", false);
+    safety_enable_timeout_sec_ = declare_parameter<double>("safety_enable_timeout_sec", 0.25);
     encoder_counts_per_rev_ = declare_parameter<double>("encoder_counts_per_rev", 16384.0);
     left_encoder_sign_ = declare_parameter<int>("left_encoder_sign", -1);
     right_encoder_sign_ = declare_parameter<int>("right_encoder_sign", 1);
@@ -94,6 +99,9 @@ public:
     right_subscription_ = create_subscription<std_msgs::msg::Float64>(
       "/rear_right_wheel_speed_cmd", 10,
       [this](const std_msgs::msg::Float64::SharedPtr message) {on_right_command(*message);});
+    safety_enable_subscription_ = create_subscription<std_msgs::msg::Bool>(
+      "/alignment/drive_enabled", 10,
+      [this](const std_msgs::msg::Bool::SharedPtr message) {on_safety_enable(*message);});
     left_actual_rpm_publisher_ = create_publisher<std_msgs::msg::Float64>("/zlac8015d/left_actual_rpm", 10);
     right_actual_rpm_publisher_ = create_publisher<std_msgs::msg::Float64>("/zlac8015d/right_actual_rpm", 10);
     left_encoder_publisher_ = create_publisher<std_msgs::msg::Int64>("/zlac8015d/left_encoder_count", 10);
@@ -130,6 +138,7 @@ private:
       max_motor_rpm_ > kControllerRpmLimit || acceleration_time_ms_ < 0 ||
       acceleration_time_ms_ > 32767 || deceleration_time_ms_ < 0 || deceleration_time_ms_ > 32767 ||
       command_timeout_sec_ <= 0.0 || fault_poll_rate_hz_ <= 0.0 || reconnect_interval_sec_ <= 0.0 ||
+      safety_enable_timeout_sec_ <= 0.0 ||
       encoder_counts_per_rev_ <= 0.0 || (left_encoder_sign_ != -1 && left_encoder_sign_ != 1) ||
       (right_encoder_sign_ != -1 && right_encoder_sign_ != 1))
     {
@@ -149,6 +158,19 @@ private:
     right_wheel_rad_s_ = message.data;
     command_received_ = true;
     last_command_time_ = now();
+  }
+
+  void on_safety_enable(const std_msgs::msg::Bool & message)
+  {
+    safety_enabled_ = message.data;
+    safety_enable_received_ = true;
+    last_safety_enable_time_ = now();
+  }
+
+  bool safety_is_enabled() const
+  {
+    return !require_safety_enable_ || (safety_enable_received_ && safety_enabled_ &&
+      (now() - last_safety_enable_time_).seconds() <= safety_enable_timeout_sec_);
   }
 
   bool initialize_driver()
@@ -173,16 +195,20 @@ private:
       write_register(kRegisterLeftAcceleration, static_cast<uint16_t>(acceleration_time_ms_)) &&
       write_register(kRegisterRightAcceleration, static_cast<uint16_t>(acceleration_time_ms_)) &&
       write_register(kRegisterLeftDeceleration, static_cast<uint16_t>(deceleration_time_ms_)) &&
-      write_register(kRegisterRightDeceleration, static_cast<uint16_t>(deceleration_time_ms_)) &&
-      write_target_rpm(0, 0) && write_control(kControlEnable);
+      write_register(kRegisterRightDeceleration, static_cast<uint16_t>(deceleration_time_ms_));
     if (!configured) {
       modbus_.disconnect();
       return false;
     }
     communication_failures_ = 0;
     command_received_ = false;
-    state_ = DriverState::READY;
-    RCLCPP_INFO(get_logger(), "ZLAC8015D Velocity Mode 초기화 완료; 새 ROS 명령 전까지 0 RPM 유지");
+    motor_enabled_ = false;
+    state_ = require_safety_enable_ ? DriverState::SAFETY_STOP : DriverState::READY;
+    if (!require_safety_enable_ && !enable_motor()) {
+      modbus_.disconnect();
+      return false;
+    }
+    RCLCPP_INFO(get_logger(), "ZLAC8015D Velocity Mode 초기화 완료; 안전 신호와 새 ROS 명령을 기다립니다");
     return true;
   }
 
@@ -198,6 +224,17 @@ private:
       return;
     }
     if (state_ == DriverState::DRIVER_FAULT || state_ == DriverState::COMMUNICATION_FAULT) {
+      publish_state();
+      return;
+    }
+    if (!safety_is_enabled()) {
+      // /alignment/drive_enabled가 false이거나 오래되면 속도를 0으로 하고 0x07 Stop을 한 번 보낸다.
+      if (motor_enabled_) {disable_motor();}
+      state_ = DriverState::SAFETY_STOP;
+      publish_state();
+      return;
+    }
+    if (!motor_enabled_ && !enable_motor()) {
       publish_state();
       return;
     }
@@ -260,6 +297,24 @@ private:
     return write_register(kRegisterControlWord, control_word);
   }
 
+  bool disable_motor()
+  {
+    // 사용자가 확인한 ZLAC 0x07: 목표 속도 0 및 토크 해제 Stop.
+    const bool stopped = write_target_rpm(0, 0) && write_control(kControlStop);
+    motor_enabled_ = false;
+    command_received_ = false;
+    return stopped;
+  }
+
+  bool enable_motor()
+  {
+    // 안전 입력이 복구된 뒤에만 다시 Enable한다. 이전 비영 속도는 복원하지 않는다.
+    if (!write_target_rpm(0, 0) || !write_control(kControlEnable)) {return false;}
+    motor_enabled_ = true;
+    command_received_ = false;
+    return true;
+  }
+
   bool poll_status()
   {
     // 0x20A5부터 8개를 한 transaction으로 읽어 좌/우 fault, position, velocity를 같은 샘플로 묶는다.
@@ -283,8 +338,7 @@ private:
     if (left_fault_ != 0 || right_fault_ != 0) {
       RCLCPP_ERROR(get_logger(), "ZLAC8015D fault 감지: left=0x%04X right=0x%04X; 명령을 차단합니다",
         left_fault_, right_fault_);
-      write_target_rpm(0, 0);
-      write_control(kControlStop);
+      disable_motor();
       state_ = DriverState::DRIVER_FAULT;
       command_received_ = false;
     }
@@ -352,8 +406,7 @@ private:
       return;
     }
     try {
-      write_target_rpm(0, 0);
-      write_control(kControlStop);
+      disable_motor();
       modbus_.disconnect();
     } catch (...) {
       // destructor에서는 어떤 예외도 밖으로 전파하지 않는다.
@@ -368,7 +421,7 @@ private:
       return;
     }
     // 자동 reset은 하지 않는다. 이 service 호출만이 명시적 fault clear 경로다.
-    if (!write_target_rpm(0, 0) || !write_control(kControlStop) || !write_control(kControlClearFault)) {
+    if (!disable_motor() || !write_control(kControlClearFault)) {
       response.success = false;
       response.message = "fault clear Modbus 명령 전송 실패";
       return;
@@ -380,14 +433,14 @@ private:
       response.message = "fault가 남아 있어 Enable하지 않았습니다";
       return;
     }
-    if (!write_register(kRegisterControlMode, kVelocityMode) || !write_target_rpm(0, 0) ||
-      !write_control(kControlEnable))
+    if (!write_register(kRegisterControlMode, kVelocityMode) ||
+      (safety_is_enabled() && !enable_motor()))
     {
       response.success = false;
       response.message = "fault clear 후 Velocity Mode 재초기화 실패";
       return;
     }
-    state_ = DriverState::READY;
+    state_ = safety_is_enabled() ? DriverState::READY : DriverState::SAFETY_STOP;
     response.success = true;
     response.message = "fault clear 완료; 새 wheel command 전까지 0 RPM 유지";
   }
@@ -400,22 +453,24 @@ private:
 
   std::string serial_port_;
   int baudrate_{}, driver_id_{}, serial_timeout_ms_{}, max_communication_failures_{};
-  double gear_ratio_{}, max_motor_rpm_{}, command_timeout_sec_{}, fault_poll_rate_hz_{}, reconnect_interval_sec_{};
+  double gear_ratio_{}, max_motor_rpm_{}, command_timeout_sec_{}, fault_poll_rate_hz_{}, reconnect_interval_sec_{}, safety_enable_timeout_sec_{};
   double encoder_counts_per_rev_{};
   bool left_motor_inverted_{}, right_motor_inverted_{};
   int left_encoder_sign_{}, right_encoder_sign_{};
   int acceleration_time_ms_{}, deceleration_time_ms_{};
   double left_wheel_rad_s_{}, right_wheel_rad_s_{};
   bool command_received_{false};
+  bool require_safety_enable_{false}, safety_enable_received_{false}, safety_enabled_{false}, motor_enabled_{false};
   int communication_failures_{0};
   uint16_t left_fault_{}, right_fault_{};
   bool encoder_baseline_set_{false};
   int32_t previous_left_raw_count_{}, previous_right_raw_count_{};
   int64_t left_accumulated_count_{}, right_accumulated_count_{};
   DriverState state_{DriverState::DISCONNECTED};
-  rclcpp::Time last_command_time_, last_reconnect_time_, last_status_poll_time_;
+  rclcpp::Time last_command_time_, last_reconnect_time_, last_status_poll_time_, last_safety_enable_time_;
   zlac8015d_driver::ModbusInterface modbus_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr left_subscription_, right_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr safety_enable_subscription_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr left_actual_rpm_publisher_, right_actual_rpm_publisher_;
   rclcpp::Publisher<std_msgs::msg::Int64>::SharedPtr left_encoder_publisher_, right_encoder_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr wheel_joint_state_publisher_;

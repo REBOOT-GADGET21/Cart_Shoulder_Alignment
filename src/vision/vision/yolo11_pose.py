@@ -64,6 +64,7 @@ class Yolo11nPoseDetector:
     cart's ``best.pt`` (8 custom keypoints) share the same ROS launch path.
     """
 
+    # best.pt를 바탕으로 keypoint 인덱스 정의 
     CUSTOM_LAYOUT = PoseLayout(
         name="custom_cart_8",
         keypoint_count=8,
@@ -76,7 +77,7 @@ class Yolo11nPoseDetector:
     COCO_LAYOUT = PoseLayout(
         name="coco_17",
         keypoint_count=17,
-        nose=0, left_eye=1, right_eye=2,
+        mouth=0, left_eye=1, right_eye=2,
         left_shoulder=5, right_shoulder=6,
         left_hip=11, right_hip=12,
         face_indices=(0, 1, 2, 3, 4),

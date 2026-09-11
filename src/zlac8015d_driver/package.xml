@@ -16,5 +16,8 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>hwt9053_imu</exec_depend>
+  <exec_depend>vision</exec_depend>
+  <exec_depend>shoulder_align_controller</exec_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

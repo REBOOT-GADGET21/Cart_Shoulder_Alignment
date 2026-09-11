@@ -6,7 +6,10 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+from launch.substitutions import LaunchConfiguration
 
 
 def _matmul(left, right):
@@ -49,6 +52,7 @@ def _camera_optical_quaternion(config):
 
 
 def generate_launch_description() -> LaunchDescription:
+    require_safety_enable = LaunchConfiguration("require_safety_enable")
     driver_config = get_package_share_directory("zlac8015d_driver") + "/config/zlac8015d.yaml"
     params_path = Path.cwd() / "src" / "params_setting.json"
     if not params_path.exists():
@@ -68,11 +72,13 @@ def generate_launch_description() -> LaunchDescription:
     camera_q = _camera_optical_quaternion(cart_params)
     rear_to_base_x_m = -cart_params["rear_axle_x_m"]
     return LaunchDescription([
+        # 단독 모터 시험은 false, real_alignment.launch.py는 true를 전달한다.
+        DeclareLaunchArgument("require_safety_enable", default_value="false"),
         # Twist 우선순위와 wheel rad/s 변환은 기존 노드를 그대로 재사용한다.
         Node(package="rear_ackermann_controller", executable="rear_ackermann_node", output="screen"),
         # 이 노드는 wheel rad/s만 받아 RS485 Modbus RPM 명령으로 변환한다.
         Node(package="zlac8015d_driver", executable="zlac8015d_driver_node",
-             parameters=[driver_config], output="screen"),
+             parameters=[driver_config, {"require_safety_enable": ParameterValue(require_safety_enable, value_type=bool)}], output="screen"),
         # 바퀴 encoder feedback만으로 실제 차체의 /odom을 만든다.
         Node(package="zlac8015d_driver", executable="wheel_odometry_node",
              parameters=[odometry_parameters], output="screen"),

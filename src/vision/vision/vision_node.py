@@ -203,6 +203,7 @@ class RealSensePoseNode(Node):
                 self.camera_valid_pub.publish(Bool(data=False))
                 self._publish_valid(False)
                 return
+            # 8개의 keypoint를 4개로 줄임 [왼쪽 어깨, 오른쪽 어깨, 얼굴, 골반]
             output_points = [points[0], points[1], points[2], pelvis]
             camera_message = PoseArray()
             camera_message.header.stamp = self.get_clock().now().to_msg()

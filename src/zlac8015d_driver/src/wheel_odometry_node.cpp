@@ -101,6 +101,7 @@ private:
     }
     if (use_imu_yaw_ && !imu_yaw_is_fresh()) {
       // IMU가 멈춘 동안 encoder yaw를 누적하지 않아, 복구 시 방향 불연속을 막는다.
+      // IMU가 0.2초 이상 끊기면 odometry 갱신 중단
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "최신 IMU yaw를 기다리는 중입니다");
       previous_left_angle_rad_ = message.position[0];
       previous_right_angle_rad_ = message.position[1];

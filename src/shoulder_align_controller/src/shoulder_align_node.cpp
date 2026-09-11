@@ -56,6 +56,8 @@ public:
     cmd_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/alignment_cmd", 10);
     angle_error_publisher_ = create_publisher<std_msgs::msg::Float32>("/alignment/error_angle_deg", 10);
     aligned_publisher_ = create_publisher<std_msgs::msg::Bool>("/alignment/aligned", 10);
+    // 실제 모터 드라이버가 이 신호를 받는다. false이면 0x07 Stop으로 토크를 해제한다.
+    drive_enabled_publisher_ = create_publisher<std_msgs::msg::Bool>("/alignment/drive_enabled", 10);
     state_publisher_ = create_publisher<std_msgs::msg::String>("/shoulder_align/state", 10);
     debug_publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>("/shoulder_align/debug_markers", 10);
     timer_ = create_wall_timer(50ms, [this]() {control_step();});
@@ -69,6 +71,7 @@ private:
   void on_landmarks(const geometry_msgs::msg::PoseArray & message)
   {
     // pose[0..3]: left shoulder, right shoulder, head centre, pelvis centre; odom frame and metres.
+    // 얼굴 좌표와 골반 좌표를 바탕으로 방향(머리->어깨) 설정 할 수 있음
     if (message.poses.size() < 4) {landmarks_.reset(); return;}
     Landmarks value{{message.poses[0].position.x, message.poses[0].position.y},
       {message.poses[1].position.x, message.poses[1].position.y},
@@ -88,6 +91,7 @@ private:
     last_odom_time_ = now();
   }
 
+  // 목표 위치 설정
   std::optional<sac::Pose2D> raw_goal() const
   {
     if (!landmarks_) {return std::nullopt;}
@@ -103,6 +107,7 @@ private:
     return sac::Pose2D{{mid.x + distance_m * head_normal.x, mid.y + distance_m * head_normal.y}, sac::angle_of(front)};
   }
 
+  // 목표 입력 정상 여부를 판단하여 /alignment/drive_enabled를 20Hz로 발행
   sac::Pose2D filter_goal(const sac::Pose2D & raw)
   {
     const auto current = now();
@@ -123,10 +128,12 @@ private:
     if (!landmarks_ || !robot_ || (now() - last_landmark_time_).seconds() > measurement_timeout_s_ ||
       (now() - last_odom_time_).seconds() > odom_timeout_s_ ||
       (!landmarks_->frame_id.empty() && !robot_->frame_id.empty() && landmarks_->frame_id != robot_->frame_id)) {
-      publish_stop(); publish_state(); publish_aligned_status(); return;
+      // 카메라/YOLO/TF/IMU/encoder 중 하나가 끊기면 /odom 또는 /shoulder_line이 오래된다.
+      // 이때는 기존 제어기 출력도 0으로 만들고, 모터 토크 해제 신호도 함께 보낸다.
+      publish_stop(); publish_drive_enabled(false); publish_state(); publish_aligned_status(); return;
     }
     const auto raw = raw_goal();
-    if (!raw) {publish_stop(); return;}
+    if (!raw) {publish_stop(); publish_drive_enabled(false); return;}
     const auto goal = filter_goal(*raw);
     const auto previous = mode_;
     auto result = sac::compute_hybrid_control(robot_->pose, goal, mode_, params_);
@@ -142,6 +149,8 @@ private:
       RCLCPP_INFO(get_logger(), "Hybrid state %s -> %s (rho=%.3f m, heading=%.2f deg)", state_name(previous).c_str(), state_name(mode_).c_str(), result.rho_m, result.heading_error_rad * 180.0 / sac::kPi);
     }
     publish_velocity(result.linear_mps, result.angular_rad_s);
+    // 입력 좌표와 odom이 모두 최신일 때만 드라이버가 토크를 Enable할 수 있다.
+    publish_drive_enabled(true);
     publish_angle_error_deg(result.heading_error_rad);
     publish_debug(goal, result);
     publish_state(); publish_aligned_status();
@@ -155,6 +164,7 @@ private:
   }
   void publish_angle_error_deg(const double e) {std_msgs::msg::Float32 m; m.data = static_cast<float>(e * 180.0 / sac::kPi); angle_error_publisher_->publish(m);}
   void publish_aligned_status() {std_msgs::msg::Bool m; m.data = mode_ == sac::HybridMode::HOLD; aligned_publisher_->publish(m);}
+  void publish_drive_enabled(const bool enabled) {std_msgs::msg::Bool m; m.data = enabled; drive_enabled_publisher_->publish(m);}
   void publish_state() {std_msgs::msg::String m; m.data = state_name(mode_); state_publisher_->publish(m);}
   void publish_debug(const sac::Pose2D & goal, const sac::HybridControlResult & result)
   {
@@ -181,6 +191,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr angle_error_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr aligned_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr drive_enabled_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_publisher_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;

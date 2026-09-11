@@ -34,6 +34,23 @@ ros2 launch zlac8015d_driver hardware_drive.launch.py
 
 이 launch는 `rear_ackermann_controller`와 실제 모터 드라이버만 실행한다. Gazebo의 wheel bridge, `alignment_control.launch.py`, 또는 simulation launch와 동시에 실행하지 않는다.
 
+## 실제 자동 정렬
+
+```bash
+ros2 launch zlac8015d_driver real_alignment.launch.py
+```
+
+이 launch는 HWT9053 IMU, 실제 모터/encoder odometry, 카메라 TF, D435+YOLO, 그리고
+기존 `shoulder_align_node`를 함께 실행한다. Gazebo와는 함께 실행하지 않는다.
+shoulder_align_node는 가제보를 실행하는 명령어로 가제보와 실제 하드웨어를 함께 실행하지 않는다
+
+자동 정렬 중 제어기가 `/alignment/drive_enabled`를 20 Hz로 발행한다. 카메라/YOLO/TF가
+끊겨 `/shoulder_line`이 오래되거나, IMU/encoder가 끊겨 `/odom`이 오래되면 이 값은
+`false`가 된다. 드라이버는 0 RPM을 쓴 뒤 ZLAC control word `0x07 Stop`으로 토크를
+해제한다. 입력이 다시 정상화되면 `0x08 Enable` 뒤 새 제어 명령으로만 재출발한다.
+이 안전 인터록은 `real_alignment.launch.py`에서만 강제된다. 단독 모터 시험 launch는
+기존처럼 `require_safety_enable:=false`가 기본이다.
+
 ## 안전 시험 순서
 
 1. 물리 E-stop을 준비하고 바퀴를 지면에서 완전히 띄운다.
