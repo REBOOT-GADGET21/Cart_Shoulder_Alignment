@@ -10,6 +10,7 @@ import rclpy
 from geometry_msgs.msg import Pose, PoseArray, PoseStamped
 from rclpy.duration import Duration
 from rclpy.node import Node
+from rclpy.time import Time
 from std_msgs.msg import Bool, Float32
 import tf2_geometry_msgs  # Registers geometry message conversions with tf2.
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -229,7 +230,12 @@ class RealSensePoseNode(Node):
             message.header.frame_id = self.odom_frame
             for pose in camera_message.poses:
                 source = PoseStamped()
-                source.header.stamp = message.header.stamp
+                # Encoder odometry TF is intentionally sampled at a lower
+                # rate than D435 frames.  Requesting the camera frame's exact
+                # current timestamp can therefore ask TF for a time newer than
+                # its latest odom sample.  A zero stamp means "latest" in tf2
+                # and keeps the fixed camera-to-base chain usable.
+                source.header.stamp = Time().to_msg()
                 source.header.frame_id = self.camera_frame
                 source.pose = pose
                 transformed = self.tf_buffer.transform(source, self.odom_frame, timeout=Duration(seconds=0.05))
