@@ -227,6 +227,21 @@ private:
       publish_state();
       return;
     }
+    // Encoder feedback must remain available while the automatic-alignment
+    // interlock holds the motors stopped.  /odom is needed to transform the
+    // camera measurement that eventually enables that interlock, so polling
+    // only after safety_is_enabled() would create a startup deadlock.
+    const double poll_period_sec = 1.0 / fault_poll_rate_hz_;
+    if ((now() - last_status_poll_time_).seconds() >= poll_period_sec) {
+      last_status_poll_time_ = now();
+      poll_status();
+    }
+    if (!modbus_.connected() || state_ == DriverState::DRIVER_FAULT ||
+      state_ == DriverState::COMMUNICATION_FAULT)
+    {
+      publish_state();
+      return;
+    }
     if (!safety_is_enabled()) {
       // /alignment/drive_enabled가 false이거나 오래되면 속도를 0으로 하고 0x07 Stop을 한 번 보낸다.
       if (motor_enabled_) {disable_motor();}
@@ -249,11 +264,6 @@ private:
       state_ = DriverState::READY;
       write_target_rpm(to_motor_rpm(left_wheel_rad_s_, left_motor_inverted_),
         to_motor_rpm(right_wheel_rad_s_, right_motor_inverted_));
-    }
-    const double poll_period_sec = 1.0 / fault_poll_rate_hz_;
-    if (modbus_.connected() && (now() - last_status_poll_time_).seconds() >= poll_period_sec) {
-      last_status_poll_time_ = now();
-      poll_status();
     }
     publish_state();
   }
