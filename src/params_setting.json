@@ -1,14 +1,14 @@
 {
   "__commet": "카트 차체의 앞뒤 전체 길이(m), 카트 차체의 좌우 전체 폭(m),",
   "body_length_m": 1.310,
-  "body_width_m": 0.611,
+  "body_width_m": 0.612,
 
   "__commet": "base_link 원점 기준 후륜 축의 x 위치(m), 좌우 후륜 중심 사이 거리(m)",
   "rear_axle_x_m": -0.505,
-  "rear_track_m": 0.5425,
+  "rear_track_m": 0.5494,
 
   "__commet": "base_link 원점 기준 전방 캐스터의 x 위치(m), 구동 바퀴 반지름(m)",
-  "front_caster_x_m": 0.45937,
+  "front_caster_x_m": 0.453,
   "wheel_radius_m": 0.1016,
 
   "__commet": "IMU 파라미터 설정",
@@ -21,9 +21,9 @@
   "imu_yaw_sign": 1.0,
 
   "__commet": "IMU 장착 위치",
-  "base_to_imu_x_m": -0.204,
+  "base_to_imu_x_m": -0.343,
   "base_to_imu_y_m": 0.0,
-  "base_to_imu_z_m": 0.095,
+  "base_to_imu_z_m": 0.05,
   "base_to_imu_roll_rad": 0.0,
   "base_to_imu_pitch_rad": 0.0,
   "base_to_imu_yaw_rad": 0.0,
@@ -36,7 +36,7 @@
   "__commet": "사람의 전방 어깨선에서 유지할 최종 여유 거리(m), 정렬 완료로 판단하는 허용 헤딩 오차(rad)",
   "__commet": "정렬 완료로 판단하는 좌우 위치 허용 오차(m), 정렬 완료로 판단하는 앞뒤 위치 허용 오차(m)",
   "__commet": "정렬 완료로 확정하기 위해 연속으로 만족해야 하는 프레임 수, 어깨선과 골반선의 평행 여부를 판단하는 허용 각도(rad)",
-  "alignment_front_clearance_m": 0.70,
+  "alignment_front_clearance_m": 0.10,
   "alignment_yaw_tolerance_rad": 0.035,
   "alignment_lateral_tolerance_m": 0.02,
   "alignment_longitudinal_tolerance_m": 0.03,
