@@ -1,9 +1,17 @@
-// 통합 노드
+// Snapshot-based shoulder alignment for the real cart.
+//
+// The cart stays stopped while it measures a person for a short interval.
+// A robust median snapshot is then converted to one fixed target pose. Drive
+// control never consumes subsequent YOLO landmarks, so frame-to-frame pose
+// jitter cannot reverse the target or the steering command during motion.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -12,209 +20,312 @@
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/string.hpp"
-#include "visualization_msgs/msg/marker_array.hpp"
 
-#include "shoulder_align_controller/geometry_utils.hpp"
-#include "shoulder_align_controller/hybrid_lyapunov_controller.hpp"
-
-namespace sac = shoulder_align_controller;
 using namespace std::chrono_literals;
+
+namespace
+{
+constexpr double kPi = 3.14159265358979323846;
+struct Vec2 { double x{}; double y{}; };
+struct RobotPose { Vec2 position; double yaw_rad{}; std::string frame_id; };
+struct LandmarkPair { Vec2 left; Vec2 right; std::string frame_id; };
+struct SnapshotGoal { Vec2 shoulder_mid; Vec2 position; double yaw_rad{}; };
+
+double norm(const Vec2 & value) { return std::hypot(value.x, value.y); }
+double dot(const Vec2 & first, const Vec2 & second) { return first.x * second.x + first.y * second.y; }
+double normalize_angle(double angle)
+{
+  while (angle > kPi) { angle -= 2.0 * kPi; }
+  while (angle <= -kPi) { angle += 2.0 * kPi; }
+  return angle;
+}
+Vec2 normalized(const Vec2 & value)
+{
+  const double length = norm(value);
+  return {value.x / length, value.y / length};
+}
+double median(std::vector<double> values)
+{
+  std::sort(values.begin(), values.end());
+  const size_t middle = values.size() / 2;
+  return values.size() % 2 == 0 ? (values[middle - 1] + values[middle]) * 0.5 : values[middle];
+}
+}  // namespace
 
 class ShoulderAlignNode : public rclcpp::Node
 {
 public:
   ShoulderAlignNode() : Node("shoulder_align_node")
   {
-    stop_distance_m_ = declare_parameter<double>("stop_distance_m", 0.9);
-    // This is rear axle pivot -> front-most platform point, not total body length.
-    // The controller pose is the rear axle pivot, so it is part of the standoff.
-    platform_length_m_ = declare_parameter<double>("platform_length_m", 0.5);
-    params_.rho_enter_m = declare_parameter<double>("pos_tolerance_m", 0.03);
-    params_.theta_hold_enter_rad = declare_parameter<double>("angle_tolerance_rad", 0.02);
-    params_.k_rho = declare_parameter<double>("k_v", 0.35);
-    params_.k_alpha = declare_parameter<double>("hybrid_alpha_gain", 0.8);
-    params_.k_beta = declare_parameter<double>("hybrid_beta_gain", 0.6);
-    params_.k_heading = declare_parameter<double>("k_w", 0.8);
-    params_.max_v_mps = declare_parameter<double>("max_v_mps", 0.20);
-    params_.max_w_rad_s = declare_parameter<double>("max_w_rad_s", 0.40);
-    params_.rho_exit_m = params_.rho_enter_m + declare_parameter<double>("pos_hysteresis_m", 0.01);
-    params_.theta_hold_exit_rad = params_.theta_hold_enter_rad + declare_parameter<double>("angle_hysteresis_rad", 0.01);
-    hold_confirm_s_ = declare_parameter<double>("debounce_s", 0.20);
-    params_.v_min_approach_mps = declare_parameter<double>("hybrid_min_approach_speed_mps", 0.04);
-    params_.alpha_full_speed_rad = declare_parameter<double>("hybrid_alpha_full_speed_rad", 0.3490658504);
-    params_.alpha_stop_rad = declare_parameter<double>("hybrid_alpha_stop_rad", 1.3089969390);
-    params_.final_heading_start_m = declare_parameter<double>("hybrid_final_heading_start_m", 0.45);
-    params_.final_heading_full_m = declare_parameter<double>("hybrid_final_heading_full_m", 0.12);
-    target_position_tau_s_ = declare_parameter<double>("hybrid_target_position_tau_s", 0.18);
-    target_heading_tau_s_ = declare_parameter<double>("hybrid_target_heading_tau_s", 0.30);
-    measurement_timeout_s_ = declare_parameter<double>("measurement_timeout_s", 0.50);
+    front_clearance_m_ = declare_parameter<double>("stop_distance_m", 0.70);
+    pivot_to_front_m_ = declare_parameter<double>("platform_length_m", 0.50);
+    capture_duration_s_ = declare_parameter<double>("snapshot_capture_duration_s", 5.0);
+    capture_min_samples_ = declare_parameter<int>("snapshot_min_samples", 30);
+    landmark_timeout_s_ = declare_parameter<double>("snapshot_landmark_timeout_s", 0.50);
+    min_shoulder_width_m_ = declare_parameter<double>("snapshot_min_shoulder_width_m", 0.10);
+    max_shoulder_width_m_ = declare_parameter<double>("snapshot_max_shoulder_width_m", 0.90);
+    position_enter_m_ = declare_parameter<double>("pos_tolerance_m", 0.02);
+    position_exit_m_ = position_enter_m_ + declare_parameter<double>("pos_hysteresis_m", 0.03);
+    heading_enter_rad_ = declare_parameter<double>("angle_tolerance_rad", 0.035);
+    heading_exit_rad_ = heading_enter_rad_ + declare_parameter<double>("angle_hysteresis_rad", 0.035);
+    hold_confirm_s_ = declare_parameter<double>("debounce_s", 0.50);
+    position_kp_ = declare_parameter<double>("k_v", 0.35);
+    heading_kp_ = declare_parameter<double>("k_w", 0.80);
+    min_speed_mps_ = declare_parameter<double>("snapshot_min_speed_mps", 0.04);
+    max_speed_mps_ = declare_parameter<double>("max_v_mps", 0.30);
+    max_yaw_rate_rad_s_ = declare_parameter<double>("max_w_rad_s", 0.10);
     odom_timeout_s_ = declare_parameter<double>("odom_timeout_s", 0.25);
-
+    if (front_clearance_m_ < 0.0 || pivot_to_front_m_ <= 0.0 || capture_duration_s_ <= 0.0 ||
+      capture_min_samples_ <= 0 || landmark_timeout_s_ <= 0.0 || min_shoulder_width_m_ <= 0.0 ||
+      max_shoulder_width_m_ <= min_shoulder_width_m_ || position_enter_m_ <= 0.0 ||
+      position_exit_m_ < position_enter_m_ || heading_enter_rad_ <= 0.0 ||
+      heading_exit_rad_ < heading_enter_rad_ || position_kp_ <= 0.0 || heading_kp_ <= 0.0 ||
+      min_speed_mps_ < 0.0 || max_speed_mps_ <= 0.0 || min_speed_mps_ > max_speed_mps_ ||
+      max_yaw_rate_rad_s_ <= 0.0 || odom_timeout_s_ <= 0.0)
+    {
+      throw std::invalid_argument("Invalid snapshot alignment parameters");
+    }
     shoulder_subscription_ = create_subscription<geometry_msgs::msg::PoseArray>("/shoulder_line", 10,
-      [this](geometry_msgs::msg::PoseArray::SharedPtr message) {on_landmarks(*message);});
+      [this](geometry_msgs::msg::PoseArray::SharedPtr message) { on_landmarks(*message); });
     odom_subscription_ = create_subscription<nav_msgs::msg::Odometry>("/odom", 20,
-      [this](nav_msgs::msg::Odometry::SharedPtr message) {on_odom(*message);});
-    // Automatic alignment must not masquerade as manual /cmd_vel input.
+      [this](nav_msgs::msg::Odometry::SharedPtr message) { on_odom(*message); });
     cmd_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/alignment_cmd", 10);
     angle_error_publisher_ = create_publisher<std_msgs::msg::Float32>("/alignment/error_angle_deg", 10);
     aligned_publisher_ = create_publisher<std_msgs::msg::Bool>("/alignment/aligned", 10);
-    // 실제 모터 드라이버가 이 신호를 받는다. false이면 0x07 Stop으로 토크를 해제한다.
     drive_enabled_publisher_ = create_publisher<std_msgs::msg::Bool>("/alignment/drive_enabled", 10);
     state_publisher_ = create_publisher<std_msgs::msg::String>("/shoulder_align/state", 10);
-    debug_publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>("/shoulder_align/debug_markers", 10);
-    timer_ = create_wall_timer(50ms, [this]() {control_step();});
+    timer_ = create_wall_timer(50ms, [this] { control_step(); });
   }
 
 private:
-  struct Landmarks {sac::Vec2 left; sac::Vec2 right; sac::Vec2 head; sac::Vec2 pelvis; std::string frame_id;};
-  struct RobotPose {sac::Pose2D pose; std::string frame_id;};
-  static bool finite(const sac::Vec2 & p) {return std::isfinite(p.x) && std::isfinite(p.y);}
+  enum class State { CAPTURE, DRIVE, FINAL_HEADING, HOLD };
 
   void on_landmarks(const geometry_msgs::msg::PoseArray & message)
   {
-    // pose[0..3]: left shoulder, right shoulder, head centre, pelvis centre; odom frame and metres.
-    // 얼굴 좌표와 골반 좌표를 바탕으로 방향(머리->어깨) 설정 할 수 있음
-    if (message.poses.size() < 4) {landmarks_.reset(); return;}
-    Landmarks value{{message.poses[0].position.x, message.poses[0].position.y},
-      {message.poses[1].position.x, message.poses[1].position.y},
-      {message.poses[2].position.x, message.poses[2].position.y},
-      {message.poses[3].position.x, message.poses[3].position.y}, message.header.frame_id};
-    if (!finite(value.left) || !finite(value.right) || !finite(value.head) || !finite(value.pelvis) ||
-      sac::norm({value.right.x - value.left.x, value.right.y - value.left.y}) < 0.05) {landmarks_.reset(); return;}
-    landmarks_ = value;
+    // Head and pelvis are deliberately ignored. Their noisy direction used to
+    // choose a different approach side on successive YOLO frames.
+    if (message.poses.size() < 2) { return; }
+    LandmarkPair sample{{message.poses[0].position.x, message.poses[0].position.y},
+      {message.poses[1].position.x, message.poses[1].position.y}, message.header.frame_id};
+    const double width = norm({sample.right.x - sample.left.x, sample.right.y - sample.left.y});
+    if (!std::isfinite(sample.left.x) || !std::isfinite(sample.left.y) ||
+      !std::isfinite(sample.right.x) || !std::isfinite(sample.right.y) ||
+      width < min_shoulder_width_m_ || width > max_shoulder_width_m_) { return; }
+    latest_landmarks_ = sample;
     last_landmark_time_ = now();
+    ++landmark_sequence_;
   }
 
   void on_odom(const nav_msgs::msg::Odometry & message)
   {
     const auto & q = message.pose.pose.orientation;
-    const double yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
-    robot_ = RobotPose{{{message.pose.pose.position.x, message.pose.pose.position.y}, yaw}, message.header.frame_id};
+    const double yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y),
+      1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    robot_ = RobotPose{{message.pose.pose.position.x, message.pose.pose.position.y}, yaw, message.header.frame_id};
     last_odom_time_ = now();
   }
 
-  // 목표 위치 설정
-  std::optional<sac::Pose2D> raw_goal() const
+  bool odom_is_fresh() const
   {
-    if (!landmarks_) {return std::nullopt;}
-    const sac::Vec2 mid{(landmarks_->left.x + landmarks_->right.x) / 2.0,
-      (landmarks_->left.y + landmarks_->right.y) / 2.0};
-    const sac::Vec2 shoulder_line = sac::normalized({landmarks_->right.x - landmarks_->left.x, landmarks_->right.y - landmarks_->left.y});
-    sac::Vec2 head_normal = sac::rotate_90_ccw(shoulder_line);
-    const sac::Vec2 body_axis{landmarks_->head.x - landmarks_->pelvis.x, landmarks_->head.y - landmarks_->pelvis.y};
-    if (sac::dot(head_normal, body_axis) < 0.0) {head_normal = {-head_normal.x, -head_normal.y};}
-    const sac::Vec2 front{mid.x - landmarks_->head.x, mid.y - landmarks_->head.y};
-    if (sac::norm(front) < 1e-6) {return std::nullopt;}
-    // stop_distance_m_ is the requested clearance ahead of the platform.  The
-    // robot pose, however, is at the rear axle pivot.  Adding pivot-to-front
-    // distance prevents treating a 0.70 m front clearance as a 0.70 m rear
-    // axle target (which would drive the physical platform too close).
-    const double rear_pivot_standoff_m = stop_distance_m_ + platform_length_m_;
-    return sac::Pose2D{{mid.x + rear_pivot_standoff_m * head_normal.x,
-      mid.y + rear_pivot_standoff_m * head_normal.y}, sac::angle_of(front)};
+    return robot_.has_value() && (now() - last_odom_time_).seconds() <= odom_timeout_s_;
   }
 
-  // 목표 입력 정상 여부를 판단하여 /alignment/drive_enabled를 20Hz로 발행
-  sac::Pose2D filter_goal(const sac::Pose2D & raw)
+  bool capture_input_is_valid() const
   {
-    const auto current = now();
-    if (!filtered_goal_) {filtered_goal_ = raw;} else {
-      const double dt = std::max(0.0, (current - last_goal_filter_time_).seconds());
-      const double position_lambda = dt / (target_position_tau_s_ + dt);
-      const double heading_lambda = dt / (target_heading_tau_s_ + dt);
-      filtered_goal_->position.x += position_lambda * (raw.position.x - filtered_goal_->position.x);
-      filtered_goal_->position.y += position_lambda * (raw.position.y - filtered_goal_->position.y);
-      filtered_goal_->yaw_rad = sac::normalize_angle(filtered_goal_->yaw_rad + heading_lambda * sac::normalize_angle(raw.yaw_rad - filtered_goal_->yaw_rad));
+    return latest_landmarks_.has_value() && odom_is_fresh() &&
+      (now() - last_landmark_time_).seconds() <= landmark_timeout_s_ &&
+      (latest_landmarks_->frame_id.empty() || robot_->frame_id.empty() ||
+      latest_landmarks_->frame_id == robot_->frame_id);
+  }
+
+  void start_capture()
+  {
+    capture_samples_.clear();
+    capture_started_ = true;
+    capture_started_at_ = now();
+    captured_sequence_ = landmark_sequence_ - 1;
+    RCLCPP_INFO(get_logger(), "Snapshot capture started: keep the cart and person still for %.1f s", capture_duration_s_);
+  }
+
+  void add_new_capture_sample()
+  {
+    if (captured_sequence_ == landmark_sequence_) { return; }
+    captured_sequence_ = landmark_sequence_;
+    capture_samples_.push_back(*latest_landmarks_);
+  }
+
+  bool finalize_snapshot()
+  {
+    if (static_cast<int>(capture_samples_.size()) < capture_min_samples_) { return false; }
+    std::vector<double> left_x, left_y, right_x, right_y;
+    left_x.reserve(capture_samples_.size()); left_y.reserve(capture_samples_.size());
+    right_x.reserve(capture_samples_.size()); right_y.reserve(capture_samples_.size());
+    for (const auto & sample : capture_samples_) {
+      left_x.push_back(sample.left.x); left_y.push_back(sample.left.y);
+      right_x.push_back(sample.right.x); right_y.push_back(sample.right.y);
     }
-    last_goal_filter_time_ = current;
-    return *filtered_goal_;
+    const Vec2 left{median(left_x), median(left_y)};
+    const Vec2 right{median(right_x), median(right_y)};
+    const Vec2 midpoint{(left.x + right.x) * 0.5, (left.y + right.y) * 0.5};
+    const Vec2 shoulder{right.x - left.x, right.y - left.y};
+    if (norm(shoulder) < min_shoulder_width_m_) { return false; }
+
+    // Select the side already occupied by the cart, once. This geometric
+    // choice cannot flip with left/right labels or head/pelvis jitter.
+    const Vec2 shoulder_unit = normalized(shoulder);
+    Vec2 normal{-shoulder_unit.y, shoulder_unit.x};
+    const Vec2 robot_from_midpoint{robot_->position.x - midpoint.x, robot_->position.y - midpoint.y};
+    if (dot(normal, robot_from_midpoint) < 0.0) { normal = {-normal.x, -normal.y}; }
+    const double rear_pivot_standoff_m = front_clearance_m_ + pivot_to_front_m_;
+    const Vec2 target{midpoint.x + normal.x * rear_pivot_standoff_m,
+      midpoint.y + normal.y * rear_pivot_standoff_m};
+    // At the final point the cart faces the shoulder midpoint, not a noisy head point.
+    snapshot_goal_ = SnapshotGoal{midpoint, target, std::atan2(midpoint.y - target.y, midpoint.x - target.x)};
+    state_ = State::DRIVE;
+    hold_candidate_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
+    RCLCPP_INFO(get_logger(), "Snapshot locked from %zu samples: target=(%.3f, %.3f), rear standoff=%.3f m",
+      capture_samples_.size(), target.x, target.y, rear_pivot_standoff_m);
+    return true;
+  }
+
+  void reset_capture(const char * reason)
+  {
+    if (state_ != State::CAPTURE) { RCLCPP_WARN(get_logger(), "Snapshot discarded: %s", reason); }
+    state_ = State::CAPTURE;
+    snapshot_goal_.reset();
+    capture_samples_.clear();
+    capture_started_ = false;
+    hold_candidate_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
   }
 
   void control_step()
   {
-    if (!landmarks_ || !robot_ || (now() - last_landmark_time_).seconds() > measurement_timeout_s_ ||
-      (now() - last_odom_time_).seconds() > odom_timeout_s_ ||
-      (!landmarks_->frame_id.empty() && !robot_->frame_id.empty() && landmarks_->frame_id != robot_->frame_id)) {
-      // 카메라/YOLO/TF/IMU/encoder 중 하나가 끊기면 /odom 또는 /shoulder_line이 오래된다.
-      // 이때는 기존 제어기 출력도 0으로 만들고, 모터 토크 해제 신호도 함께 보낸다.
-      publish_stop(); publish_drive_enabled(false); publish_state(); publish_aligned_status(); return;
-    }
-    const auto raw = raw_goal();
-    if (!raw) {publish_stop(); publish_drive_enabled(false); return;}
-    const auto goal = filter_goal(*raw);
-    const auto previous = mode_;
-    auto result = sac::compute_hybrid_control(robot_->pose, goal, mode_, params_);
-    if (mode_ == sac::HybridMode::HEADING && result.mode == sac::HybridMode::HOLD) {
-      if (hold_candidate_since_.nanoseconds() == 0) {hold_candidate_since_ = now();}
-      if ((now() - hold_candidate_since_).seconds() < hold_confirm_s_) {
-        result = sac::compute_hybrid_control(robot_->pose, goal, sac::HybridMode::HEADING, params_);
-        result.mode = sac::HybridMode::HEADING;
-      }
-    } else if (result.mode != sac::HybridMode::HOLD) {hold_candidate_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());}
-    mode_ = result.mode;
-    if (mode_ != previous) {
-      RCLCPP_INFO(get_logger(), "Hybrid state %s -> %s (rho=%.3f m, heading=%.2f deg)", state_name(previous).c_str(), state_name(mode_).c_str(), result.rho_m, result.heading_error_rad * 180.0 / sac::kPi);
-    }
-    log_control(result, goal);
-    publish_velocity(result.linear_mps, result.angular_rad_s);
-    // 입력 좌표와 odom이 모두 최신일 때만 드라이버가 토크를 Enable할 수 있다.
-    publish_drive_enabled(true);
-    publish_angle_error_deg(result.heading_error_rad);
-    publish_debug(goal, result);
-    publish_state(); publish_aligned_status();
+    // Odom is required throughout motion. Landmarks are required only for
+    // CAPTURE, then deliberately ignored until a future capture starts.
+    if (!odom_is_fresh()) { reset_capture("odometry is stale"); publish_stop(false); return; }
+    if (state_ == State::CAPTURE) { capture_step(); return; }
+    drive_step();
   }
 
-  static std::string state_name(const sac::HybridMode state)
+  void capture_step()
   {
-    if (state == sac::HybridMode::POSITION) {return "POSITION";}
-    if (state == sac::HybridMode::HEADING) {return "HEADING";}
-    return "HOLD";
+    publish_stop(false);
+    if (!capture_input_is_valid()) {
+      if (capture_started_) { reset_capture("waiting for matching /shoulder_line and /odom frames"); }
+      return;
+    }
+    if (!capture_started_) { start_capture(); }
+    add_new_capture_sample();
+    if ((now() - capture_started_at_).seconds() < capture_duration_s_) { return; }
+    if (!finalize_snapshot()) {
+      RCLCPP_WARN(get_logger(), "Snapshot rejected: only %zu valid shoulder samples; retrying", capture_samples_.size());
+      capture_started_ = false;
+      capture_samples_.clear();
+    }
   }
-  void log_control(const sac::HybridControlResult & result, const sac::Pose2D & goal)
+
+  void drive_step()
   {
-    // Keep all quantities needed to distinguish "no advance because already
-    // at standoff" from "no advance because bearing is too large" together.
-    const double goal_dx = goal.position.x - robot_->pose.position.x;
-    const double goal_dy = goal.position.y - robot_->pose.position.y;
-    const double lateral_error_m = -std::sin(robot_->pose.yaw_rad) * goal_dx +
-      std::cos(robot_->pose.yaw_rad) * goal_dy;
-    const sac::Vec2 shoulder_mid{
-      (landmarks_->left.x + landmarks_->right.x) / 2.0,
-      (landmarks_->left.y + landmarks_->right.y) / 2.0};
-    const double shoulder_range_m = sac::norm({shoulder_mid.x - robot_->pose.position.x,
-      shoulder_mid.y - robot_->pose.position.y});
+    const Vec2 delta{snapshot_goal_->position.x - robot_->position.x,
+      snapshot_goal_->position.y - robot_->position.y};
+    const double rho_m = norm(delta);
+    const double alpha_rad = normalize_angle(std::atan2(delta.y, delta.x) - robot_->yaw_rad);
+    const double heading_error_rad = normalize_angle(snapshot_goal_->yaw_rad - robot_->yaw_rad);
+    double linear_mps = 0.0;
+    double angular_rad_s = 0.0;
+
+    if (state_ == State::DRIVE) {
+      if (rho_m <= position_enter_m_) {
+        state_ = State::FINAL_HEADING;
+      } else {
+        const double speed = std::min(max_speed_mps_, std::max(min_speed_mps_, position_kp_ * rho_m));
+        if (std::abs(alpha_rad) <= kPi * 0.5) {
+          // The fixed target is ahead: drive forward while correcting bearing.
+          linear_mps = speed * std::cos(alpha_rad);
+          angular_rad_s = heading_kp_ * alpha_rad;
+        } else {
+          // The cart is inside the requested standoff. Back out directly while
+          // facing the person, instead of performing an unstable 180 degree turn.
+          const double reverse_bearing = normalize_angle(alpha_rad - (alpha_rad >= 0.0 ? kPi : -kPi));
+          linear_mps = -speed * std::cos(reverse_bearing);
+          angular_rad_s = heading_kp_ * reverse_bearing;
+        }
+      }
+    }
+
+    if (state_ == State::FINAL_HEADING) {
+      if (std::abs(heading_error_rad) <= heading_enter_rad_) {
+        if (hold_candidate_since_.nanoseconds() == 0) { hold_candidate_since_ = now(); }
+        if ((now() - hold_candidate_since_).seconds() >= hold_confirm_s_) { state_ = State::HOLD; }
+      } else {
+        hold_candidate_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
+        angular_rad_s = heading_kp_ * heading_error_rad;
+      }
+    }
+
+    if (state_ == State::HOLD &&
+      (rho_m >= position_exit_m_ || std::abs(heading_error_rad) >= heading_exit_rad_)) { state_ = State::DRIVE; }
+
+    linear_mps = std::clamp(linear_mps, -max_speed_mps_, max_speed_mps_);
+    angular_rad_s = std::clamp(angular_rad_s, -max_yaw_rate_rad_s_, max_yaw_rate_rad_s_);
+    const bool enabled = state_ == State::DRIVE || state_ == State::FINAL_HEADING;
+    log_control(rho_m, alpha_rad, heading_error_rad, linear_mps, angular_rad_s);
+    publish_velocity(linear_mps, angular_rad_s, enabled, heading_error_rad);
+  }
+
+  static const char * state_name(State state)
+  {
+    switch (state) {
+      case State::CAPTURE: return "CAPTURE";
+      case State::DRIVE: return "DRIVE";
+      case State::FINAL_HEADING: return "FINAL_HEADING";
+      case State::HOLD: return "HOLD";
+    }
+    return "UNKNOWN";
+  }
+
+  void log_control(double rho_m, double alpha_rad, double heading_error_rad, double linear_mps, double angular_rad_s)
+  {
+    const double shoulder_range_m = norm({snapshot_goal_->shoulder_mid.x - robot_->position.x,
+      snapshot_goal_->shoulder_mid.y - robot_->position.y});
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
       "state=%s rho_err=%.3f m shoulder_range=%.3f m target_rear_range=%.3f m "
-      "lateral_err=%.3f m alpha=%.2f deg heading_err=%.2f deg gate=%.2f cmd=(v=%.3f m/s,w=%.3f rad/s)",
-      state_name(mode_).c_str(), result.rho_m, shoulder_range_m,
-      stop_distance_m_ + platform_length_m_, lateral_error_m,
-      result.alpha_rad * 180.0 / sac::kPi, result.heading_error_rad * 180.0 / sac::kPi,
-      result.translation_gate, result.linear_mps, result.angular_rad_s);
+      "alpha=%.2f deg heading_err=%.2f deg cmd=(v=%.3f m/s,w=%.3f rad/s)",
+      state_name(state_), rho_m, shoulder_range_m, front_clearance_m_ + pivot_to_front_m_,
+      alpha_rad * 180.0 / kPi, heading_error_rad * 180.0 / kPi, linear_mps, angular_rad_s);
   }
-  void publish_angle_error_deg(const double e) {std_msgs::msg::Float32 m; m.data = static_cast<float>(e * 180.0 / sac::kPi); angle_error_publisher_->publish(m);}
-  void publish_aligned_status() {std_msgs::msg::Bool m; m.data = mode_ == sac::HybridMode::HOLD; aligned_publisher_->publish(m);}
-  void publish_drive_enabled(const bool enabled) {std_msgs::msg::Bool m; m.data = enabled; drive_enabled_publisher_->publish(m);}
-  void publish_state() {std_msgs::msg::String m; m.data = state_name(mode_); state_publisher_->publish(m);}
-  void publish_debug(const sac::Pose2D & goal, const sac::HybridControlResult & result)
-  {
-    visualization_msgs::msg::MarkerArray markers;
-    visualization_msgs::msg::Marker target;
-    target.header.frame_id = landmarks_->frame_id; target.header.stamp = now(); target.ns = "shoulder_alignment"; target.id = 0;
-    target.type = visualization_msgs::msg::Marker::ARROW; target.action = visualization_msgs::msg::Marker::ADD;
-    target.pose.position.x = goal.position.x; target.pose.position.y = goal.position.y;
-    target.pose.orientation.z = std::sin(goal.yaw_rad / 2.0); target.pose.orientation.w = std::cos(goal.yaw_rad / 2.0);
-    target.scale.x = 0.25; target.scale.y = target.scale.z = 0.06; target.color.g = target.color.a = 1.0; markers.markers.push_back(target);
-    debug_publisher_->publish(markers);
-    (void)result;
-  }
-  void publish_velocity(const double v, const double w) {geometry_msgs::msg::Twist m; m.linear.x = v; m.angular.z = w; cmd_publisher_->publish(m);}
-  void publish_stop() {publish_velocity(0.0, 0.0);}
 
-  double stop_distance_m_{}, platform_length_m_{}, hold_confirm_s_{}, target_position_tau_s_{}, target_heading_tau_s_{}, measurement_timeout_s_{}, odom_timeout_s_{};
-  sac::HybridControlParams params_;
-  sac::HybridMode mode_{sac::HybridMode::POSITION};
-  std::optional<Landmarks> landmarks_; std::optional<RobotPose> robot_; std::optional<sac::Pose2D> filtered_goal_;
-  rclcpp::Time last_landmark_time_{0, 0, RCL_ROS_TIME}, last_odom_time_{0, 0, RCL_ROS_TIME}, last_goal_filter_time_{0, 0, RCL_ROS_TIME}, hold_candidate_since_{0, 0, RCL_ROS_TIME};
+  void publish_velocity(double linear_mps, double angular_rad_s, bool drive_enabled, double heading_error_rad)
+  {
+    geometry_msgs::msg::Twist command;
+    command.linear.x = linear_mps;
+    command.angular.z = angular_rad_s;
+    cmd_publisher_->publish(command);
+    drive_enabled_publisher_->publish(std_msgs::msg::Bool().set__data(drive_enabled));
+    aligned_publisher_->publish(std_msgs::msg::Bool().set__data(state_ == State::HOLD));
+    state_publisher_->publish(std_msgs::msg::String().set__data(state_name(state_)));
+    angle_error_publisher_->publish(std_msgs::msg::Float32().set__data(
+      static_cast<float>(heading_error_rad * 180.0 / kPi)));
+  }
+
+  void publish_stop(bool drive_enabled) { publish_velocity(0.0, 0.0, drive_enabled, 0.0); }
+
+  double front_clearance_m_{}, pivot_to_front_m_{}, capture_duration_s_{}, landmark_timeout_s_{};
+  int capture_min_samples_{};
+  double min_shoulder_width_m_{}, max_shoulder_width_m_{};
+  double position_enter_m_{}, position_exit_m_{}, heading_enter_rad_{}, heading_exit_rad_{}, hold_confirm_s_{};
+  double position_kp_{}, heading_kp_{}, min_speed_mps_{}, max_speed_mps_{}, max_yaw_rate_rad_s_{}, odom_timeout_s_{};
+  State state_{State::CAPTURE};
+  std::optional<LandmarkPair> latest_landmarks_;
+  std::optional<RobotPose> robot_;
+  std::optional<SnapshotGoal> snapshot_goal_;
+  std::vector<LandmarkPair> capture_samples_;
+  uint64_t landmark_sequence_{}, captured_sequence_{};
+  bool capture_started_{false};
+  rclcpp::Time capture_started_at_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_landmark_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time hold_candidate_since_{0, 0, RCL_ROS_TIME};
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr shoulder_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;
@@ -222,11 +333,13 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr aligned_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr drive_enabled_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_publisher_;
-  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
 int main(int argc, char * argv[])
 {
-  rclcpp::init(argc, argv); rclcpp::spin(std::make_shared<ShoulderAlignNode>()); rclcpp::shutdown(); return 0;
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<ShoulderAlignNode>());
+  rclcpp::shutdown();
+  return 0;
 }
