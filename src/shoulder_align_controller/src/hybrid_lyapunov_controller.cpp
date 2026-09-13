@@ -58,6 +58,7 @@ HybridControlResult compute_hybrid_control(
   if (result.mode == HybridMode::POSITION) {
     const double gate = heading_speed_gate(
       std::abs(result.alpha_rad), params.alpha_full_speed_rad, params.alpha_stop_rad);
+    result.translation_gate = gate;
     const double base_speed = std::min(
       params.max_v_mps, std::max(params.v_min_approach_mps, params.k_rho * result.rho_m));
     result.linear_mps = base_speed * std::cos(result.alpha_rad) * gate;

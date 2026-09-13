@@ -26,6 +26,8 @@ public:
   ShoulderAlignNode() : Node("shoulder_align_node")
   {
     stop_distance_m_ = declare_parameter<double>("stop_distance_m", 0.9);
+    // This is rear axle pivot -> front-most platform point, not total body length.
+    // The controller pose is the rear axle pivot, so it is part of the standoff.
     platform_length_m_ = declare_parameter<double>("platform_length_m", 0.5);
     params_.rho_enter_m = declare_parameter<double>("pos_tolerance_m", 0.03);
     params_.theta_hold_enter_rad = declare_parameter<double>("angle_tolerance_rad", 0.02);
@@ -103,8 +105,13 @@ private:
     if (sac::dot(head_normal, body_axis) < 0.0) {head_normal = {-head_normal.x, -head_normal.y};}
     const sac::Vec2 front{mid.x - landmarks_->head.x, mid.y - landmarks_->head.y};
     if (sac::norm(front) < 1e-6) {return std::nullopt;}
-    const double distance_m = stop_distance_m_ + platform_length_m_;
-    return sac::Pose2D{{mid.x + distance_m * head_normal.x, mid.y + distance_m * head_normal.y}, sac::angle_of(front)};
+    // stop_distance_m_ is the requested clearance ahead of the platform.  The
+    // robot pose, however, is at the rear axle pivot.  Adding pivot-to-front
+    // distance prevents treating a 0.70 m front clearance as a 0.70 m rear
+    // axle target (which would drive the physical platform too close).
+    const double rear_pivot_standoff_m = stop_distance_m_ + platform_length_m_;
+    return sac::Pose2D{{mid.x + rear_pivot_standoff_m * head_normal.x,
+      mid.y + rear_pivot_standoff_m * head_normal.y}, sac::angle_of(front)};
   }
 
   // 목표 입력 정상 여부를 판단하여 /alignment/drive_enabled를 20Hz로 발행
@@ -148,6 +155,7 @@ private:
     if (mode_ != previous) {
       RCLCPP_INFO(get_logger(), "Hybrid state %s -> %s (rho=%.3f m, heading=%.2f deg)", state_name(previous).c_str(), state_name(mode_).c_str(), result.rho_m, result.heading_error_rad * 180.0 / sac::kPi);
     }
+    log_control(result, goal);
     publish_velocity(result.linear_mps, result.angular_rad_s);
     // 입력 좌표와 odom이 모두 최신일 때만 드라이버가 토크를 Enable할 수 있다.
     publish_drive_enabled(true);
@@ -161,6 +169,27 @@ private:
     if (state == sac::HybridMode::POSITION) {return "POSITION";}
     if (state == sac::HybridMode::HEADING) {return "HEADING";}
     return "HOLD";
+  }
+  void log_control(const sac::HybridControlResult & result, const sac::Pose2D & goal)
+  {
+    // Keep all quantities needed to distinguish "no advance because already
+    // at standoff" from "no advance because bearing is too large" together.
+    const double goal_dx = goal.position.x - robot_->pose.position.x;
+    const double goal_dy = goal.position.y - robot_->pose.position.y;
+    const double lateral_error_m = -std::sin(robot_->pose.yaw_rad) * goal_dx +
+      std::cos(robot_->pose.yaw_rad) * goal_dy;
+    const sac::Vec2 shoulder_mid{
+      (landmarks_->left.x + landmarks_->right.x) / 2.0,
+      (landmarks_->left.y + landmarks_->right.y) / 2.0};
+    const double shoulder_range_m = sac::norm({shoulder_mid.x - robot_->pose.position.x,
+      shoulder_mid.y - robot_->pose.position.y});
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
+      "state=%s rho_err=%.3f m shoulder_range=%.3f m target_rear_range=%.3f m "
+      "lateral_err=%.3f m alpha=%.2f deg heading_err=%.2f deg gate=%.2f cmd=(v=%.3f m/s,w=%.3f rad/s)",
+      state_name(mode_).c_str(), result.rho_m, shoulder_range_m,
+      stop_distance_m_ + platform_length_m_, lateral_error_m,
+      result.alpha_rad * 180.0 / sac::kPi, result.heading_error_rad * 180.0 / sac::kPi,
+      result.translation_gate, result.linear_mps, result.angular_rad_s);
   }
   void publish_angle_error_deg(const double e) {std_msgs::msg::Float32 m; m.data = static_cast<float>(e * 180.0 / sac::kPi); angle_error_publisher_->publish(m);}
   void publish_aligned_status() {std_msgs::msg::Bool m; m.data = mode_ == sac::HybridMode::HOLD; aligned_publisher_->publish(m);}

@@ -41,6 +41,9 @@ struct HybridControlResult
   double alpha_rad{};
   double beta_rad{};
   double heading_error_rad{};
+  // 0 means translation is intentionally held while the bearing is too large.
+  // Exposed for runtime diagnostics; it is not an additional filter.
+  double translation_gate{};
 };
 
 double sinc_unnormalized(double angle_rad);

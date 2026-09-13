@@ -17,7 +17,16 @@ TEST(HybridLyapunov, StopsTranslationForLargeBearingError)
 {
   const auto result = sac::compute_hybrid_control({{0.0, 0.0}, sac::kPi / 2.0}, {{1.0, 0.0}, 0.0}, sac::HybridMode::POSITION, params());
   EXPECT_NEAR(result.linear_mps, 0.0, 1e-12);
+  EXPECT_NEAR(result.translation_gate, 0.0, 1e-12);
   EXPECT_LT(result.angular_rad_s, 0.0);
+}
+
+TEST(HybridLyapunov, PreservesForwardMotionForSmallBearingError)
+{
+  const auto result = sac::compute_hybrid_control(
+    {{0.0, 0.0}, 0.0}, {{1.0, 0.01}, 0.0}, sac::HybridMode::POSITION, params());
+  EXPECT_GT(result.translation_gate, 0.99);
+  EXPECT_GT(result.linear_mps, 0.0);
 }
 
 TEST(HybridLyapunov, UsesPositionHeadingAndHoldHysteresis)

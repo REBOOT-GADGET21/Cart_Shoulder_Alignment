@@ -73,9 +73,9 @@
   "__commet": "상태 전환 뒤 다음 전환까지 기다리는 최소 시간(s), 위치 완료 조건의 채터링 방지 여유(m), 각도 완료 조건의 채터링 방지 여유(rad)",
   "shoulder_align_max_valid_t_m": 8.0,
   "shoulder_align_parallel_epsilon": 0.00001,
-  "shoulder_align_debounce_s": 0.20,
-  "shoulder_align_pos_hysteresis_m": 0.01,
-  "shoulder_align_angle_hysteresis_rad": 0.01,
+  "shoulder_align_debounce_s": 0.50,
+  "shoulder_align_pos_hysteresis_m": 0.03,
+  "shoulder_align_angle_hysteresis_rad": 0.035,
 
   "__commet": "Hybrid Lyapunov 제어기 임시 게인/필터값. 실차 D435 정지 데이터로 재튜닝 필요",
   "hybrid_alpha_gain": 0.8,

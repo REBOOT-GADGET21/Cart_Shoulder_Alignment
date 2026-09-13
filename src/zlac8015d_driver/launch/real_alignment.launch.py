@@ -15,6 +15,8 @@ def generate_launch_description() -> LaunchDescription:
     if not params_path.exists():
         params_path = Path(get_package_share_directory("rear_ackermann_controller")) / "config" / "params_setting.json"
     config = json.loads(params_path.read_text(encoding="utf-8"))
+    # shoulder_align_node pose is rear_axle_pivot.  It must stop this far
+    # behind the requested front clearance, not at the clearance itself.
     pivot_to_front_m = config["body_length_m"] / 2.0 - config["rear_axle_x_m"]
     controller_parameters = {
         "stop_distance_m": config["alignment_front_clearance_m"],
