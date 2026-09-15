@@ -56,7 +56,7 @@
   "__comment_vision_backend": "mediapipe = mediapipe_pose",
   "__comment_vision_backend": "yolo11n_pose = yolo11n_pose, yolo_pose_model_path: yolo11n-pose.pt, 기본값",
   "vision_pose_backend": "yolo11n_pose",
-  "yolo_pose_model_path": "result_folder_5/best.pt",
+  "yolo_pose_model_path": "dataset_images_5/best.pt",
   "yolo_pose_person_confidence": 0.45,
   "yolo_pose_keypoint_confidence": 0.50,
   "yolo_pose_device": "",
@@ -71,7 +71,7 @@
 
   "__comment_snapshot": "측정 중 카트는 정지한다. 지정 시간 동안 유효 어깨 좌표의 median을 하나의 고정 목표로 사용한다.",
   "snapshot_capture_duration_s": 5.0,
-  "snapshot_min_samples": 30,
+  "snapshot_min_samples": 10,
   "snapshot_landmark_timeout_s": 0.50,
   "snapshot_min_shoulder_width_m": 0.10,
   "snapshot_max_shoulder_width_m": 0.90,
