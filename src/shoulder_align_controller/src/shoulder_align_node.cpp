@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "snapshot_math.hpp"
 
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -28,7 +29,7 @@ namespace
 constexpr double kPi = 3.14159265358979323846;
 struct Vec2 { double x{}; double y{}; };
 struct RobotPose { Vec2 position; double yaw_rad{}; std::string frame_id; };
-struct LandmarkPair { Vec2 left; Vec2 right; std::string frame_id; };
+struct LandmarkPair { Vec2 left; Vec2 right; std::string frame_id; Vec2 body_axis; };
 struct SnapshotGoal { Vec2 shoulder_mid; Vec2 position; double yaw_rad{}; };
 
 double norm(const Vec2 & value) { return std::hypot(value.x, value.y); }
@@ -71,7 +72,12 @@ public:
     hold_confirm_s_ = declare_parameter<double>("debounce_s", 0.50);
     position_kp_ = declare_parameter<double>("k_v", 0.35);
     heading_kp_ = declare_parameter<double>("k_w", 0.80);
-    min_speed_mps_ = declare_parameter<double>("snapshot_min_speed_mps", 0.04);
+    alpha_gain_ = declare_parameter<double>("lyapunov_alpha_gain", 0.8);
+    beta_gain_ = declare_parameter<double>("lyapunov_beta_gain", 0.6);
+    shoulder_width_m_ = declare_parameter<double>("body_shoulder_width_m", 0.17);
+    eye_pelvis_m_ = declare_parameter<double>("body_eye_pelvis_m", 0.56);
+    shoulder_pelvis_m_ = declare_parameter<double>("body_shoulder_pelvis_m", 0.31);
+    length_tolerance_m_ = declare_parameter<double>("body_length_tolerance_m", 0.08);
     max_speed_mps_ = declare_parameter<double>("max_v_mps", 0.30);
     max_yaw_rate_rad_s_ = declare_parameter<double>("max_w_rad_s", 0.10);
     odom_timeout_s_ = declare_parameter<double>("odom_timeout_s", 0.25);
@@ -80,7 +86,8 @@ public:
       max_shoulder_width_m_ <= min_shoulder_width_m_ || position_enter_m_ <= 0.0 ||
       position_exit_m_ < position_enter_m_ || heading_enter_rad_ <= 0.0 ||
       heading_exit_rad_ < heading_enter_rad_ || position_kp_ <= 0.0 || heading_kp_ <= 0.0 ||
-      min_speed_mps_ < 0.0 || max_speed_mps_ <= 0.0 || min_speed_mps_ > max_speed_mps_ ||
+      alpha_gain_ <= 0.0 || beta_gain_ <= 0.0 || max_speed_mps_ <= 0.0 ||
+      shoulder_width_m_ <= 0.0 || eye_pelvis_m_ <= 0.0 || shoulder_pelvis_m_ <= 0.0 || length_tolerance_m_ <= 0.0 ||
       max_yaw_rate_rad_s_ <= 0.0 || odom_timeout_s_ <= 0.0)
     {
       throw std::invalid_argument("Invalid snapshot alignment parameters");
@@ -102,11 +109,33 @@ private:
 
   void on_landmarks(const geometry_msgs::msg::PoseArray & message)
   {
-    // Head and pelvis are deliberately ignored. Their noisy direction used to
-    // choose a different approach side on successive YOLO frames.
-    if (message.poses.size() < 2) { return; }
+    // RGB-D contract: left shoulder, right shoulder, eye midpoint, pelvis midpoint.
+    // Validate physical lengths in 3-D BEFORE projecting the body axis onto the floor.
+    if (message.poses.size() < 4) { return; }
+    for (const auto & p : message.poses) {
+      if (!std::isfinite(p.position.x) || !std::isfinite(p.position.y) ||
+        !std::isfinite(p.position.z)) { return; }
+    }
+    const auto & eye = message.poses[2].position;
+    const auto & pelvis = message.poses[3].position;
+    const auto & left = message.poses[0].position;
+    const auto & right = message.poses[1].position;
+    const auto distance = [](double x, double y, double z) { return std::sqrt(x*x + y*y + z*z); };
+    const double width3 = distance(left.x-right.x, left.y-right.y, left.z-right.z);
+    const double body3 = distance(eye.x-pelvis.x, eye.y-pelvis.y, eye.z-pelvis.z);
+    const double torso3 = distance((left.x+right.x)/2-pelvis.x,
+      (left.y+right.y)/2-pelvis.y, (left.z+right.z)/2-pelvis.z);
+    const Vec2 axis{eye.x-pelvis.x, eye.y-pelvis.y};
+    if (std::abs(width3-shoulder_width_m_) > length_tolerance_m_ ||
+      std::abs(body3-eye_pelvis_m_) > length_tolerance_m_ ||
+      std::abs(torso3-shoulder_pelvis_m_) > length_tolerance_m_ || norm(axis) < 0.20) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+        "Capture rejects geometry: shoulder=%.3f eye-pelvis=%.3f shoulder-pelvis=%.3f m",
+        width3, body3, torso3);
+      return;
+    }
     LandmarkPair sample{{message.poses[0].position.x, message.poses[0].position.y},
-      {message.poses[1].position.x, message.poses[1].position.y}, message.header.frame_id};
+      {message.poses[1].position.x, message.poses[1].position.y}, message.header.frame_id, normalized(axis)};
     const double width = norm({sample.right.x - sample.left.x, sample.right.y - sample.left.y});
     if (!std::isfinite(sample.left.x) || !std::isfinite(sample.left.y) ||
       !std::isfinite(sample.right.x) || !std::isfinite(sample.right.y) ||
@@ -119,6 +148,9 @@ private:
   void on_odom(const nav_msgs::msg::Odometry & message)
   {
     const auto & q = message.pose.pose.orientation;
+    if (!std::isfinite(message.pose.pose.position.x) || !std::isfinite(message.pose.pose.position.y) ||
+      !std::isfinite(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w) ||
+      q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w < 1e-6) { robot_.reset(); return; }
     const double yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y),
       1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     robot_ = RobotPose{{message.pose.pose.position.x, message.pose.pose.position.y}, yaw, message.header.frame_id};
@@ -157,12 +189,13 @@ private:
   bool finalize_snapshot()
   {
     if (static_cast<int>(capture_samples_.size()) < capture_min_samples_) { return false; }
-    std::vector<double> left_x, left_y, right_x, right_y;
+    std::vector<double> left_x, left_y, right_x, right_y, axis_x, axis_y;
     left_x.reserve(capture_samples_.size()); left_y.reserve(capture_samples_.size());
     right_x.reserve(capture_samples_.size()); right_y.reserve(capture_samples_.size());
     for (const auto & sample : capture_samples_) {
       left_x.push_back(sample.left.x); left_y.push_back(sample.left.y);
       right_x.push_back(sample.right.x); right_y.push_back(sample.right.y);
+      axis_x.push_back(sample.body_axis.x); axis_y.push_back(sample.body_axis.y);
     }
     const Vec2 left{median(left_x), median(left_y)};
     const Vec2 right{median(right_x), median(right_y)};
@@ -170,17 +203,21 @@ private:
     const Vec2 shoulder{right.x - left.x, right.y - left.y};
     if (norm(shoulder) < min_shoulder_width_m_) { return false; }
 
-    // Select the side already occupied by the cart, once. This geometric
-    // choice cannot flip with left/right labels or head/pelvis jitter.
-    const Vec2 shoulder_unit = normalized(shoulder);
-    Vec2 normal{-shoulder_unit.y, shoulder_unit.x};
+    // Floor-projected pelvis -> eyes supplies body heading. Shoulder angle is
+    // never used. Pick the cart's existing side once, then freeze this goal.
+    const Vec2 body{median(axis_x), median(axis_y)};
+    if (norm(body) < 0.5) { return false; }  // inconsistent samples: recapture
+    Vec2 normal = normalized(body);
     const Vec2 robot_from_midpoint{robot_->position.x - midpoint.x, robot_->position.y - midpoint.y};
     if (dot(normal, robot_from_midpoint) < 0.0) { normal = {-normal.x, -normal.y}; }
     const double rear_pivot_standoff_m = front_clearance_m_ + pivot_to_front_m_;
     const Vec2 target{midpoint.x + normal.x * rear_pivot_standoff_m,
       midpoint.y + normal.y * rear_pivot_standoff_m};
-    // At the final point the cart faces the shoulder midpoint, not a noisy head point.
+    // At the final point the cart faces the shoulder midpoint along the body axis.
     snapshot_goal_ = SnapshotGoal{midpoint, target, std::atan2(midpoint.y - target.y, midpoint.x - target.x)};
+    // Choose a virtual forward/reverse heading ONCE, avoiding sign chatter.
+    const double bearing = std::atan2(target.y-robot_->position.y, target.x-robot_->position.x);
+    travel_direction_ = std::cos(bearing-robot_->yaw_rad) >= 0.0 ? 1 : -1;
     state_ = State::DRIVE;
     hold_candidate_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
     RCLCPP_INFO(get_logger(), "Snapshot locked from %zu samples: target=(%.3f, %.3f), rear standoff=%.3f m",
@@ -238,22 +275,24 @@ private:
       if (rho_m <= position_enter_m_) {
         state_ = State::FINAL_HEADING;
       } else {
-        const double speed = std::min(max_speed_mps_, std::max(min_speed_mps_, position_kp_ * rho_m));
-        if (std::abs(alpha_rad) <= kPi * 0.5) {
-          // The fixed target is ahead: drive forward while correcting bearing.
-          linear_mps = speed * std::cos(alpha_rad);
-          angular_rad_s = heading_kp_ * alpha_rad;
-        } else {
-          // The cart is inside the requested standoff. Back out directly while
-          // facing the person, instead of performing an unstable 180 degree turn.
-          const double reverse_bearing = normalize_angle(alpha_rad - (alpha_rad >= 0.0 ? kPi : -kPi));
-          linear_mps = -speed * std::cos(reverse_bearing);
-          angular_rad_s = heading_kp_ * reverse_bearing;
-        }
+        const double bearing = std::atan2(delta.y, delta.x);
+        const double offset = travel_direction_ < 0 ? kPi : 0.0;
+        const double a = normalize_angle(bearing - robot_->yaw_rad - offset);
+        const double b = normalize_angle(bearing - snapshot_goal_->yaw_rad - offset);
+        const auto cmd = snapshot_math::control(rho_m, a, b, position_kp_,
+          alpha_gain_, beta_gain_, max_speed_mps_, max_yaw_rate_rad_s_, travel_direction_);
+        linear_mps = cmd.v;
+        angular_rad_s = cmd.w;
       }
     }
 
     if (state_ == State::FINAL_HEADING) {
+      if (rho_m >= position_exit_m_) {
+        state_ = State::DRIVE;
+        hold_candidate_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
+        publish_stop(true);
+        return;
+      }
       if (std::abs(heading_error_rad) <= heading_enter_rad_) {
         if (hold_candidate_since_.nanoseconds() == 0) { hold_candidate_since_ = now(); }
         if ((now() - hold_candidate_since_).seconds() >= hold_confirm_s_) { state_ = State::HOLD; }
@@ -314,7 +353,9 @@ private:
   int capture_min_samples_{};
   double min_shoulder_width_m_{}, max_shoulder_width_m_{};
   double position_enter_m_{}, position_exit_m_{}, heading_enter_rad_{}, heading_exit_rad_{}, hold_confirm_s_{};
-  double position_kp_{}, heading_kp_{}, min_speed_mps_{}, max_speed_mps_{}, max_yaw_rate_rad_s_{}, odom_timeout_s_{};
+  double position_kp_{}, heading_kp_{}, alpha_gain_{}, beta_gain_{}, max_speed_mps_{}, max_yaw_rate_rad_s_{}, odom_timeout_s_{};
+  double shoulder_width_m_{}, eye_pelvis_m_{}, shoulder_pelvis_m_{}, length_tolerance_m_{};
+  int travel_direction_{1};
   State state_{State::CAPTURE};
   std::optional<LandmarkPair> latest_landmarks_;
   std::optional<RobotPose> robot_;

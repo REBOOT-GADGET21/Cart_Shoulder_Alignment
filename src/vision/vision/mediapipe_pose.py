@@ -76,8 +76,13 @@ class MediaPipePoseDetector:
             return None
         # The controller uses shoulders plus a head/pelvis body axis to select
         # the head-side normal. Keep the order stable for /shoulder_line.
-        return (landmarks[self.LEFT_SHOULDER], landmarks[self.RIGHT_SHOULDER],
-                head, landmarks[self.LEFT_HIP], landmarks[self.RIGHT_HIP])
+        left, right = landmarks[self.LEFT_SHOULDER], landmarks[self.RIGHT_SHOULDER]
+        chest = MediaPipeFusedLandmark((left.x+right.x)/2, (left.y+right.y)/2,
+                                      min(left.visibility, right.visibility))
+        eyes = landmarks[self.LEFT_EYE], landmarks[self.RIGHT_EYE]
+        head = MediaPipeFusedLandmark((eyes[0].x+eyes[1].x)/2, (eyes[0].y+eyes[1].y)/2,
+                                     min(p.visibility for p in eyes))
+        return (left, right, head, landmarks[self.LEFT_HIP], landmarks[self.RIGHT_HIP], chest, *eyes)
 
     def draw_landmarks(self, image) -> None:
         """Overlay the normal MediaPipe skeleton for a human-readable preview."""

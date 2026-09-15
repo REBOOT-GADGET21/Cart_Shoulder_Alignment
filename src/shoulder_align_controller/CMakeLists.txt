@@ -16,4 +16,11 @@ ament_target_dependencies(shoulder_align_node geometry_msgs nav_msgs rclcpp std_
 
 install(TARGETS shoulder_align_node DESTINATION lib/${PROJECT_NAME})
 
+if(BUILD_TESTING)
+  enable_testing()
+  add_executable(test_snapshot_control test/test_snapshot_control.cpp)
+  target_compile_options(test_snapshot_control PRIVATE -UNDEBUG)
+  add_test(NAME snapshot_control COMMAND test_snapshot_control)
+endif()
+
 ament_package()

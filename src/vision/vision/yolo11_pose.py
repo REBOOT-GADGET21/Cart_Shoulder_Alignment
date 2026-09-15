@@ -198,10 +198,11 @@ class Yolo11nPoseDetector:
             return None
 
         xyn, confidence = normalized[best_index], confidences[best_index]
-        face = [self._landmark(xyn, confidence, index) for index in layout.face_indices]
-        head = fuse_face_keypoints(face, self._keypoint_confidence)
-        if head is None:
+        eyes = [self._landmark(xyn, confidence, index) for index in (layout.left_eye, layout.right_eye)]
+        if min(p.visibility for p in eyes) < self._keypoint_confidence:
             return None
+        head = YoloPoseLandmark((eyes[0].x+eyes[1].x)/2, (eyes[0].y+eyes[1].y)/2,
+                               min(p.visibility for p in eyes))
         left_shoulder = self._landmark(xyn, confidence, layout.left_shoulder)
         right_shoulder = self._landmark(xyn, confidence, layout.right_shoulder)
         left_hip = self._landmark(xyn, confidence, layout.left_hip)
@@ -213,7 +214,8 @@ class Yolo11nPoseDetector:
         )
         # Keep one stable ROS contract for both models:
         # left shoulder, right shoulder, head, left hip, right hip, chest.
-        return left_shoulder, right_shoulder, head, left_hip, right_hip, chest
+        # Extra eye points let RGB-D deproject each eye before taking its 3-D midpoint.
+        return left_shoulder, right_shoulder, head, left_hip, right_hip, chest, *eyes
 
     def draw_landmarks(self, image) -> None:
         if self._last_result is None:

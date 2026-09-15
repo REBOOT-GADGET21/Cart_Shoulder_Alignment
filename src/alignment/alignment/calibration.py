@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def load_alignment_settings(config_path: str | None = None) -> AlignmentSettings
     return AlignmentSettings(
         camera_extrinsics=CameraExtrinsics(
             raw["camera_to_base_x_m"], raw["camera_to_base_y_m"], raw["camera_to_base_z_m"],
-            raw["camera_roll_rad"], raw["camera_pitch_down_rad"], raw["camera_yaw_rad"],
+            raw["camera_roll_rad"], math.pi / 2.0 - raw["camera_elevation_from_down_rad"], raw["camera_yaw_rad"],
         ),
         front_clearance_m=raw["alignment_front_clearance_m"],
         body_length_m=raw["body_length_m"],

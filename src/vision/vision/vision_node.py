@@ -171,13 +171,26 @@ class RealSensePoseNode(Node):
             raw_depth = np.asanyarray(depth.get_data())
             points = []
             pixels = []
-            for landmark, filt in zip(found, (
+            for index, (landmark, filt) in enumerate(zip(found, (
                 self.left_filter, self.right_filter, self.head_filter,
                 self.left_hip_filter, self.right_hip_filter, self.chest_filter,
-            )):
+            ))):
                 u, v = round(landmark.x * intrinsics.width), round(landmark.y * intrinsics.height)
                 depth_m = robust_depth_m(raw_depth, u, v, self.depth_scale, self.depth_radius)
                 point = deproject_pixel(intrinsics, u, v, depth_m) if depth_m else None
+                if index == 2:
+                    # Eye midpoint is computed in metres, using both eye depths.
+                    # Sampling depth at the image midpoint could hit the background.
+                    eye_points = []
+                    for eye in found[6:8]:
+                        eu, ev = round(eye.x * intr.width), round(eye.y * intr.height)
+                        ed = robust_depth_m(raw_depth, eu, ev, self.depth_scale, self.depth_radius)
+                        eye_points.append(deproject_pixel(intrinsics, eu, ev, ed) if ed else None)
+                    if len(eye_points) == 2 and all(p is not None for p in eye_points):
+                        a, b = eye_points
+                        point = type(a)((a.x+b.x)/2, (a.y+b.y)/2, (a.z+b.z)/2)
+                    else:
+                        point = None
                 if point is None:
                     self.camera_valid_pub.publish(Bool(data=False))
                     self._publish_valid(False); return

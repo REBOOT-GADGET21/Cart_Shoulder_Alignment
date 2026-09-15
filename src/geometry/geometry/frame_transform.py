@@ -32,7 +32,7 @@ def transform_optical_point_to_base(point_optical_m: Point3D, extrinsics: Camera
     camera_y_m = -point_optical_m.x_m
     camera_z_m = -point_optical_m.y_m
 
-    roll, pitch, yaw = extrinsics.roll_rad, -extrinsics.pitch_down_rad, extrinsics.yaw_rad
+    roll, pitch, yaw = extrinsics.roll_rad, extrinsics.pitch_down_rad, extrinsics.yaw_rad
     cr, sr = math.cos(roll), math.sin(roll)
     cp, sp = math.cos(pitch), math.sin(pitch)
     cy, sy = math.cos(yaw), math.sin(yaw)
@@ -53,7 +53,7 @@ def transform_base_point_to_optical(point_base_m: Point3D, extrinsics: CameraExt
     base_x_m = point_base_m.x_m - extrinsics.translation_x_m
     base_y_m = point_base_m.y_m - extrinsics.translation_y_m
     base_z_m = point_base_m.z_m - extrinsics.translation_z_m
-    roll, pitch, yaw = extrinsics.roll_rad, -extrinsics.pitch_down_rad, extrinsics.yaw_rad
+    roll, pitch, yaw = extrinsics.roll_rad, extrinsics.pitch_down_rad, extrinsics.yaw_rad
     cr, sr = math.cos(roll), math.sin(roll)
     cp, sp = math.cos(pitch), math.sin(pitch)
     cy, sy = math.cos(yaw), math.sin(yaw)

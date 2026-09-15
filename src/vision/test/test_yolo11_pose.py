@@ -1,6 +1,33 @@
 from vision.yolo11_pose import Yolo11nPoseDetector, YoloPoseLandmark, fuse_face_keypoints
 
 
+def test_detector_returns_both_eyes_for_independent_depth_sampling():
+    from types import SimpleNamespace
+    import numpy as np
+
+    class Tensor:
+        def __init__(self, value): self.value = np.array(value)
+        def detach(self): return self
+        def cpu(self): return self
+        def numpy(self): return self.value
+
+    class Keypoints:
+        xyn = Tensor([[[0.2, 0.2], [0.4, 0.2], [0.9, 0.9],
+                       [0.2, 0.4], [0.4, 0.4], [0.2, 0.8], [0.4, 0.8], [0.3, 0.5]]])
+        conf = Tensor([[0.9]*8])
+        def __len__(self): return 1
+
+    detector = Yolo11nPoseDetector.__new__(Yolo11nPoseDetector)
+    detector._layout = detector.CUSTOM_LAYOUT
+    detector._person_confidence = detector._keypoint_confidence = 0.5
+    detector._device = ""
+    detector._model = SimpleNamespace(predict=lambda **kwargs: [SimpleNamespace(keypoints=Keypoints(), boxes=None)])
+    points = detector.detect(None)
+    assert len(points) == 8
+    assert abs(points[2].x - 0.3) < 1e-9  # Mouth at x=.9 must not shift eye centre.
+    assert points[6].x == 0.2 and points[7].x == 0.4
+
+
 def test_yolo_landmark_indices_match_custom_eight_keypoint_schema():
     layout = Yolo11nPoseDetector.layout_for_keypoint_count(8)
     assert layout.face_indices == (0, 1, 2)

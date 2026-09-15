@@ -117,3 +117,11 @@ def test_camera_transform_round_trip() -> None:
     assert recovered.x_m == pytest.approx(point_base.x_m)
     assert recovered.y_m == pytest.approx(point_base.y_m)
     assert recovered.z_m == pytest.approx(point_base.z_m)
+
+
+def test_downward_camera_ray_points_toward_floor() -> None:
+    # 60deg above vertically down = 30deg below horizontal.
+    extrinsics = CameraExtrinsics(0, 0, 0.6, pitch_down_rad=math.pi / 6)
+    p = transform_optical_point_to_base(Point3D(0, 0, 1), extrinsics)
+    assert p.x_m == pytest.approx(math.sqrt(3)/2)
+    assert p.z_m == pytest.approx(0.1)

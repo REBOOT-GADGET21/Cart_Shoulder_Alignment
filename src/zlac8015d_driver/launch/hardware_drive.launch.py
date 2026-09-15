@@ -40,7 +40,8 @@ def _quaternion_from_rotation(matrix):
 def _camera_optical_quaternion(config):
     """Return base_link <- D435 optical rotation used by geometry.frame_transform."""
     roll = config["camera_roll_rad"]
-    pitch = -config["camera_pitch_down_rad"]
+    # 0 = vertically down; pi/2 = horizontal. Positive Ry tilts forward down.
+    pitch = math.pi / 2.0 - config["camera_elevation_from_down_rad"]
     yaw = config["camera_yaw_rad"]
     cr, sr, cp, sp, cy, sy = math.cos(roll), math.sin(roll), math.cos(pitch), math.sin(pitch), math.cos(yaw), math.sin(yaw)
     mount = [[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],

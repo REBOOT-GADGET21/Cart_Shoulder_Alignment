@@ -35,7 +35,12 @@ def generate_launch_description() -> LaunchDescription:
         "snapshot_landmark_timeout_s": config["snapshot_landmark_timeout_s"],
         "snapshot_min_shoulder_width_m": config["snapshot_min_shoulder_width_m"],
         "snapshot_max_shoulder_width_m": config["snapshot_max_shoulder_width_m"],
-        "snapshot_min_speed_mps": config["snapshot_min_speed_mps"],
+        "lyapunov_alpha_gain": config["lyapunov_alpha_gain"],
+        "lyapunov_beta_gain": config["lyapunov_beta_gain"],
+        "body_shoulder_width_m": config["body_shoulder_width_m"],
+        "body_eye_pelvis_m": config["body_eye_pelvis_m"],
+        "body_shoulder_pelvis_m": config["body_shoulder_pelvis_m"],
+        "body_length_tolerance_m": config["body_length_tolerance_m"],
     }
     zlac_launch = Path(get_package_share_directory("zlac8015d_driver")) / "launch" / "hardware_drive.launch.py"
     imu_launch = Path(get_package_share_directory("hwt9053_imu")) / "launch" / "hwt9053_imu.launch.py"
