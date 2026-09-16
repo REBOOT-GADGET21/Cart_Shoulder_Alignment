@@ -36,7 +36,7 @@
   "__commet": "사람의 전방 어깨선에서 유지할 최종 여유 거리(m), 정렬 완료로 판단하는 허용 헤딩 오차(rad)",
   "__commet": "정렬 완료로 판단하는 좌우 위치 허용 오차(m), 정렬 완료로 판단하는 앞뒤 위치 허용 오차(m)",
   "__commet": "정렬 완료로 확정하기 위해 연속으로 만족해야 하는 프레임 수, 어깨선과 골반선의 평행 여부를 판단하는 허용 각도(rad)",
-  "alignment_front_clearance_m": 0.10,
+  "alignment_front_clearance_m": 0.02,
   "alignment_yaw_tolerance_rad": 0.035,
   "alignment_lateral_tolerance_m": 0.02,
   "alignment_longitudinal_tolerance_m": 0.03,
