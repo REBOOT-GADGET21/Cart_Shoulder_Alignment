@@ -80,6 +80,8 @@ public:
     length_tolerance_m_ = declare_parameter<double>("body_length_tolerance_m", 0.08);
     max_speed_mps_ = declare_parameter<double>("max_v_mps", 0.30);
     max_yaw_rate_rad_s_ = declare_parameter<double>("max_w_rad_s", 0.10);
+    // A zero default preserves the former behaviour: stop after final heading.
+    post_hold_advance_distance_m_ = declare_parameter<double>("post_hold_advance_distance_m", 0.0);
     odom_timeout_s_ = declare_parameter<double>("odom_timeout_s", 0.25);
     if (front_clearance_m_ < 0.0 || pivot_to_front_m_ <= 0.0 || capture_duration_s_ <= 0.0 ||
       capture_min_samples_ <= 0 || landmark_timeout_s_ <= 0.0 || min_shoulder_width_m_ <= 0.0 ||
@@ -88,7 +90,7 @@ public:
       heading_exit_rad_ < heading_enter_rad_ || position_kp_ <= 0.0 || heading_kp_ <= 0.0 ||
       alpha_gain_ <= 0.0 || beta_gain_ <= 0.0 || max_speed_mps_ <= 0.0 ||
       shoulder_width_m_ <= 0.0 || eye_pelvis_m_ <= 0.0 || shoulder_pelvis_m_ <= 0.0 || length_tolerance_m_ <= 0.0 ||
-      max_yaw_rate_rad_s_ <= 0.0 || odom_timeout_s_ <= 0.0)
+      max_yaw_rate_rad_s_ <= 0.0 || post_hold_advance_distance_m_ < 0.0 || odom_timeout_s_ <= 0.0)
     {
       throw std::invalid_argument("Invalid snapshot alignment parameters");
     }
@@ -105,7 +107,7 @@ public:
   }
 
 private:
-  enum class State { CAPTURE, DRIVE, FINAL_HEADING, HOLD };
+  enum class State { CAPTURE, DRIVE, FINAL_HEADING, HOLD, POST_HOLD_ADVANCE, COMPLETE };
 
   void on_landmarks(const geometry_msgs::msg::PoseArray & message)
   {
@@ -239,7 +241,12 @@ private:
   {
     // Odom is required throughout motion. Landmarks are required only for
     // CAPTURE, then deliberately ignored until a future capture starts.
-    if (!odom_is_fresh()) { reset_capture("odometry is stale"); publish_stop(false); return; }
+    if (!odom_is_fresh()) {
+      // COMPLETE is terminal; a later odometry outage must not start a new capture.
+      if (state_ != State::COMPLETE) { reset_capture("odometry is stale"); }
+      publish_stop(false);
+      return;
+    }
     if (state_ == State::CAPTURE) { capture_step(); return; }
     drive_step();
   }
@@ -302,12 +309,40 @@ private:
       }
     }
 
-    if (state_ == State::HOLD &&
-      (rho_m >= position_exit_m_ || std::abs(heading_error_rad) >= heading_exit_rad_)) { state_ = State::DRIVE; }
+    if (state_ == State::HOLD) {
+      // Alignment is terminal. Do not reopen the old target after this point.
+      if (post_hold_advance_distance_m_ == 0.0) {
+        state_ = State::COMPLETE;
+        RCLCPP_INFO(get_logger(), "Alignment complete: no post-hold advance requested");
+      } else {
+        post_hold_start_ = robot_->position;
+        post_hold_heading_rad_ = robot_->yaw_rad;
+        state_ = State::POST_HOLD_ADVANCE;
+        RCLCPP_INFO(get_logger(), "Post-hold advance started: %.3f m straight ahead",
+          post_hold_advance_distance_m_);
+      }
+    }
+
+    if (state_ == State::POST_HOLD_ADVANCE) {
+      // Count only displacement along the yaw saved at HOLD. This phase sends
+      // no angular command, so it is a deliberately straight final advance.
+      const Vec2 displacement{robot_->position.x - post_hold_start_.x,
+        robot_->position.y - post_hold_start_.y};
+      const Vec2 forward{std::cos(post_hold_heading_rad_), std::sin(post_hold_heading_rad_)};
+      const double advanced_m = dot(displacement, forward);
+      if (advanced_m >= post_hold_advance_distance_m_) {
+        state_ = State::COMPLETE;
+        RCLCPP_INFO(get_logger(), "Post-hold advance complete: %.3f m", advanced_m);
+      } else {
+        // Use a slow fixed command, still bounded by the global speed limit.
+        linear_mps = std::min(max_speed_mps_, 0.05);
+      }
+    }
 
     linear_mps = std::clamp(linear_mps, -max_speed_mps_, max_speed_mps_);
     angular_rad_s = std::clamp(angular_rad_s, -max_yaw_rate_rad_s_, max_yaw_rate_rad_s_);
-    const bool enabled = state_ == State::DRIVE || state_ == State::FINAL_HEADING;
+    const bool enabled = state_ == State::DRIVE || state_ == State::FINAL_HEADING ||
+      state_ == State::POST_HOLD_ADVANCE;
     log_control(rho_m, alpha_rad, heading_error_rad, linear_mps, angular_rad_s);
     publish_velocity(linear_mps, angular_rad_s, enabled, heading_error_rad);
   }
@@ -319,6 +354,8 @@ private:
       case State::DRIVE: return "DRIVE";
       case State::FINAL_HEADING: return "FINAL_HEADING";
       case State::HOLD: return "HOLD";
+      case State::POST_HOLD_ADVANCE: return "POST_HOLD_ADVANCE";
+      case State::COMPLETE: return "COMPLETE";
     }
     return "UNKNOWN";
   }
@@ -341,7 +378,8 @@ private:
     command.angular.z = angular_rad_s;
     cmd_publisher_->publish(command);
     drive_enabled_publisher_->publish(std_msgs::msg::Bool().set__data(drive_enabled));
-    aligned_publisher_->publish(std_msgs::msg::Bool().set__data(state_ == State::HOLD));
+    aligned_publisher_->publish(std_msgs::msg::Bool().set__data(
+      state_ == State::HOLD || state_ == State::COMPLETE));
     state_publisher_->publish(std_msgs::msg::String().set__data(state_name(state_)));
     angle_error_publisher_->publish(std_msgs::msg::Float32().set__data(
       static_cast<float>(heading_error_rad * 180.0 / kPi)));
@@ -354,6 +392,7 @@ private:
   double min_shoulder_width_m_{}, max_shoulder_width_m_{};
   double position_enter_m_{}, position_exit_m_{}, heading_enter_rad_{}, heading_exit_rad_{}, hold_confirm_s_{};
   double position_kp_{}, heading_kp_{}, alpha_gain_{}, beta_gain_{}, max_speed_mps_{}, max_yaw_rate_rad_s_{}, odom_timeout_s_{};
+  double post_hold_advance_distance_m_{}, post_hold_heading_rad_{};
   double shoulder_width_m_{}, eye_pelvis_m_{}, shoulder_pelvis_m_{}, length_tolerance_m_{};
   int travel_direction_{1};
   State state_{State::CAPTURE};
@@ -367,6 +406,7 @@ private:
   rclcpp::Time last_landmark_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time hold_candidate_since_{0, 0, RCL_ROS_TIME};
+  Vec2 post_hold_start_{};
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr shoulder_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;

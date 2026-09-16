@@ -41,6 +41,7 @@ def generate_launch_description() -> LaunchDescription:
         "body_eye_pelvis_m": config["body_eye_pelvis_m"],
         "body_shoulder_pelvis_m": config["body_shoulder_pelvis_m"],
         "body_length_tolerance_m": config["body_length_tolerance_m"],
+        "post_hold_advance_distance_m": config["post_hold_advance_distance_m"],
     }
     zlac_launch = Path(get_package_share_directory("zlac8015d_driver")) / "launch" / "hardware_drive.launch.py"
     imu_launch = Path(get_package_share_directory("hwt9053_imu")) / "launch" / "hwt9053_imu.launch.py"

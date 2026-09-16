@@ -85,6 +85,8 @@
   "shoulder_align_debounce_s": 0.50,
   "shoulder_align_pos_hysteresis_m": 0.03,
   "shoulder_align_angle_hysteresis_rad": 0.035,
+  "__comment_post_hold_advance": "정렬 완료 후 한 번만 odom 거리 기준으로 직진할 거리(m). 0이면 추가 이동 없이 종료.",
+  "post_hold_advance_distance_m": 0.3,
 
   "__commet": "중심좌표 x, 중심좌표 y, 어깨 폭(불변), 어깨 방향(반시계:+, 시계-)",
   "gazebo_fake_shoulder_center_x_m": 3.0,

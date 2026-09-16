@@ -41,6 +41,7 @@ def generate_launch_description() -> LaunchDescription:
         "body_eye_pelvis_m": config["body_eye_pelvis_m"],
         "body_shoulder_pelvis_m": config["body_shoulder_pelvis_m"],
         "body_length_tolerance_m": config["body_length_tolerance_m"],
+        "post_hold_advance_distance_m": config["post_hold_advance_distance_m"],
     }
     bridge = [
         "/rear_left_wheel_speed_cmd@std_msgs/msg/Float64@gz.msgs.Double",

@@ -28,7 +28,10 @@ Vdot = -kr*rho^2*cos(a)^2 - ka*a^2. Speed limits scale both commands by the
 same positive factor to preserve this property. No minimum-speed floor is
 applied. Finite sampling, actuator dead zones, odometry error, switching and
 angle wrapping still require physical validation; this is not a shortest-path
-guarantee. FINAL_HEADING aligns the final yaw and HOLD stops the cart.
+guarantee. FINAL_HEADING aligns the final yaw. HOLD then performs one optional
+straight odometry-based advance (`post_hold_advance_distance_m`) at 0.05 m/s
+with zero angular command, and COMPLETE stops permanently. A value of `0.0`
+disables this final advance.
 
 `camera_elevation_from_down_rad=1.0472` means 60 degrees above vertically down,
 equivalently 30 degrees below horizontal. It replaces the ambiguous shared
