@@ -28,10 +28,20 @@ Vdot = -kr*rho^2*cos(a)^2 - ka*a^2. Speed limits scale both commands by the
 same positive factor to preserve this property. No minimum-speed floor is
 applied. Finite sampling, actuator dead zones, odometry error, switching and
 angle wrapping still require physical validation; this is not a shortest-path
-guarantee. FINAL_HEADING aligns the final yaw. HOLD then performs one optional
-straight odometry-based advance (`post_hold_advance_distance_m`) at 0.05 m/s
-with zero angular command, and COMPLETE stops permanently. A value of `0.0`
-disables this final advance.
+guarantee. FINAL_HEADING aligns the final yaw. With a nonzero
+`post_hold_advance_distance_m`, HOLD commands zero velocity while keeping the
+drive enabled, avoiding a torque disable/enable cycle before departure. Fresh
+odometry must report |v| < 0.005 m/s and |w| < 0.01 rad/s continuously for
+0.5 s before departure. The departure position and yaw are then saved.
+POST_HOLD_ADVANCE ramps forward speed at 0.05 m/s² up to 0.05 m/s (also bounded
+by max_v_mps), and maintains the saved yaw using k_w, a continuous 0.5-degree
+deadband and a 0.05 rad/s correction limit. The real driver's wheel RPM ramp
+still applies. Forward projected displacement determines completion; no fresh
+camera snapshot is taken. COMPLETE stops permanently and publishes aligned=true.
+A value of `0.0` disables the advance. Odom loss in HOLD or during the advance
+stops in ABORTED, requiring restart instead of automatically repeating travel.
+These thresholds are initial settings; real wheel asymmetry, stopping distance
+and residual lateral error still need physical verification.
 
 `camera_elevation_from_down_rad=1.0472` means 60 degrees above vertically down,
 equivalently 30 degrees below horizontal. It replaces the ambiguous shared

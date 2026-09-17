@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include "snapshot_math.hpp"
+#include "advance_math.hpp"
 
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -107,7 +108,7 @@ public:
   }
 
 private:
-  enum class State { CAPTURE, DRIVE, FINAL_HEADING, HOLD, POST_HOLD_ADVANCE, COMPLETE };
+  enum class State { CAPTURE, DRIVE, FINAL_HEADING, HOLD, POST_HOLD_ADVANCE, COMPLETE, ABORTED };
 
   void on_landmarks(const geometry_msgs::msg::PoseArray & message)
   {
@@ -157,6 +158,19 @@ private:
       1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     robot_ = RobotPose{{message.pose.pose.position.x, message.pose.pose.position.y}, yaw, message.header.frame_id};
     last_odom_time_ = now();
+    // Require fresh measured motion to remain small for 0.5 s. Repeated timer
+    // ticks alone must never count as evidence that the cart has stopped.
+    if (state_ == State::HOLD) {
+      const double v = message.twist.twist.linear.x;
+      const double w = message.twist.twist.angular.z;
+      if (std::isfinite(v) && std::isfinite(w) && std::abs(v) < 0.005 && std::abs(w) < 0.01) {
+        if (!stopped_since_) { stopped_since_ = now(); }
+        stopped_confirmed_ = (now() - *stopped_since_).seconds() >= 0.5;
+      } else {
+        stopped_since_.reset();
+        stopped_confirmed_ = false;
+      }
+    }
   }
 
   bool odom_is_fresh() const
@@ -239,11 +253,19 @@ private:
 
   void control_step()
   {
+    if (state_ == State::COMPLETE || state_ == State::ABORTED) {
+      publish_stop(false);
+      return;
+    }
     // Odom is required throughout motion. Landmarks are required only for
     // CAPTURE, then deliberately ignored until a future capture starts.
     if (!odom_is_fresh()) {
       // COMPLETE is terminal; a later odometry outage must not start a new capture.
-      if (state_ != State::COMPLETE) { reset_capture("odometry is stale"); }
+      if (state_ == State::HOLD || state_ == State::POST_HOLD_ADVANCE) {
+        // Never repeat the final advance automatically after feedback loss.
+        state_ = State::ABORTED;
+        RCLCPP_ERROR(get_logger(), "Final advance aborted: odometry is stale; restart required");
+      } else { reset_capture("odometry is stale"); }
       publish_stop(false);
       return;
     }
@@ -302,7 +324,12 @@ private:
       }
       if (std::abs(heading_error_rad) <= heading_enter_rad_) {
         if (hold_candidate_since_.nanoseconds() == 0) { hold_candidate_since_ = now(); }
-        if ((now() - hold_candidate_since_).seconds() >= hold_confirm_s_) { state_ = State::HOLD; }
+        if ((now() - hold_candidate_since_).seconds() >= hold_confirm_s_) {
+          state_ = State::HOLD;
+          stopped_since_.reset();
+          stopped_confirmed_ = false;
+          RCLCPP_INFO(get_logger(), "HOLD: waiting for measured stop for 0.5 s");
+        }
       } else {
         hold_candidate_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
         angular_rad_s = heading_kp_ * heading_error_rad;
@@ -314,9 +341,11 @@ private:
       if (post_hold_advance_distance_m_ == 0.0) {
         state_ = State::COMPLETE;
         RCLCPP_INFO(get_logger(), "Alignment complete: no post-hold advance requested");
-      } else {
+      } else if (stopped_confirmed_) {
         post_hold_start_ = robot_->position;
         post_hold_heading_rad_ = robot_->yaw_rad;
+        advance_speed_mps_ = 0.0;
+        advance_tick_ = std::chrono::steady_clock::now();
         state_ = State::POST_HOLD_ADVANCE;
         RCLCPP_INFO(get_logger(), "Post-hold advance started: %.3f m straight ahead",
           post_hold_advance_distance_m_);
@@ -324,8 +353,8 @@ private:
     }
 
     if (state_ == State::POST_HOLD_ADVANCE) {
-      // Count only displacement along the yaw saved at HOLD. This phase sends
-      // no angular command, so it is a deliberately straight final advance.
+      // Count displacement along the departure yaw; retain that yaw throughout
+      // the advance to correct asymmetric wheel startup without a new snapshot.
       const Vec2 displacement{robot_->position.x - post_hold_start_.x,
         robot_->position.y - post_hold_start_.y};
       const Vec2 forward{std::cos(post_hold_heading_rad_), std::sin(post_hold_heading_rad_)};
@@ -334,15 +363,24 @@ private:
         state_ = State::COMPLETE;
         RCLCPP_INFO(get_logger(), "Post-hold advance complete: %.3f m", advanced_m);
       } else {
-        // Use a slow fixed command, still bounded by the global speed limit.
-        linear_mps = std::min(max_speed_mps_, 0.05);
+        const auto tick = std::chrono::steady_clock::now();
+        const double dt = std::clamp(std::chrono::duration<double>(tick - advance_tick_).count(), 0.0, 0.05);
+        advance_tick_ = tick;
+        advance_speed_mps_ = advance_math::speed(advance_speed_mps_, dt, max_speed_mps_);
+        linear_mps = advance_speed_mps_;
+        const double yaw_error = normalize_angle(post_hold_heading_rad_ - robot_->yaw_rad);
+        // Continuous deadband: ignore <0.5 degrees, cap correction at 0.05 rad/s.
+        angular_rad_s = advance_math::yaw_command(post_hold_heading_rad_, robot_->yaw_rad, heading_kp_);
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
+          "Advance: distance=%.3f/%.3f m yaw_error=%.2f deg v=%.3f w=%.3f",
+          advanced_m, post_hold_advance_distance_m_, yaw_error * 180.0 / kPi, linear_mps, angular_rad_s);
       }
     }
 
     linear_mps = std::clamp(linear_mps, -max_speed_mps_, max_speed_mps_);
     angular_rad_s = std::clamp(angular_rad_s, -max_yaw_rate_rad_s_, max_yaw_rate_rad_s_);
     const bool enabled = state_ == State::DRIVE || state_ == State::FINAL_HEADING ||
-      state_ == State::POST_HOLD_ADVANCE;
+      state_ == State::HOLD || state_ == State::POST_HOLD_ADVANCE;
     log_control(rho_m, alpha_rad, heading_error_rad, linear_mps, angular_rad_s);
     publish_velocity(linear_mps, angular_rad_s, enabled, heading_error_rad);
   }
@@ -356,6 +394,7 @@ private:
       case State::HOLD: return "HOLD";
       case State::POST_HOLD_ADVANCE: return "POST_HOLD_ADVANCE";
       case State::COMPLETE: return "COMPLETE";
+      case State::ABORTED: return "ABORTED";
     }
     return "UNKNOWN";
   }
@@ -379,7 +418,7 @@ private:
     cmd_publisher_->publish(command);
     drive_enabled_publisher_->publish(std_msgs::msg::Bool().set__data(drive_enabled));
     aligned_publisher_->publish(std_msgs::msg::Bool().set__data(
-      state_ == State::HOLD || state_ == State::COMPLETE));
+      state_ == State::COMPLETE));
     state_publisher_->publish(std_msgs::msg::String().set__data(state_name(state_)));
     angle_error_publisher_->publish(std_msgs::msg::Float32().set__data(
       static_cast<float>(heading_error_rad * 180.0 / kPi)));
@@ -407,6 +446,10 @@ private:
   rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time hold_candidate_since_{0, 0, RCL_ROS_TIME};
   Vec2 post_hold_start_{};
+  std::optional<rclcpp::Time> stopped_since_;
+  bool stopped_confirmed_{false};
+  double advance_speed_mps_{0.0};
+  std::chrono::steady_clock::time_point advance_tick_{};
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr shoulder_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;

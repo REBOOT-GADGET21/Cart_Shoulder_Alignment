@@ -1,10 +1,25 @@
 #include <cassert>
 #include <cmath>
 #include "../src/snapshot_math.hpp"
+#include "../src/advance_math.hpp"
 
 int main()
 {
   using namespace snapshot_math;
+  double speed = 0.0;
+  for (int i = 0; i < 20; ++i) {
+    const double next = advance_math::speed(speed, 0.05, 0.3);
+    assert(next >= speed && next - speed <= 0.002500001);
+    speed = next;
+  }
+  assert(std::abs(speed - 0.05) < 1e-9);
+  assert(advance_math::speed(0.0, 10.0, 0.3) <= 0.002500001);
+  assert(advance_math::speed(0.01, 0.05, 0.01) == 0.01);
+  assert(advance_math::yaw_command(0.0, 0.005, 0.8) == 0.0);
+  assert(advance_math::yaw_command(0.0, 0.05, 0.8) < 0.0);
+  assert(advance_math::yaw_command(0.0, -0.05, 0.8) > 0.0);
+  assert(advance_math::yaw_command(-pi + 0.02, pi - 0.02, 0.8) > 0.0);
+  assert(std::abs(advance_math::yaw_command(1.0, 0.0, 0.8)) <= 0.05);
   // V=(rho^2+alpha^2+kb*beta^2)/2 must decrease in continuous polar dynamics,
   // including shared actuator saturation. Test away from angle wrap boundaries.
   for (double a : {-1.2, -0.4, 0.0, 0.4, 1.2}) {
