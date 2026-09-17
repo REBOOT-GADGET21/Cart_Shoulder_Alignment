@@ -26,6 +26,17 @@ source install/setup.bash
 
 `config/zlac8015d.yaml`에서 `serial_port`, 감속비, 안전 RPM, 좌우 방향을 실제 장비 값으로 바꾼다. `serial_port`에는 `/dev/ttyUSB0`보다 `/dev/serial/by-id/...`의 고정 경로를 권장한다.
 
+`motor_ramp_rpm_per_sec: 5.0`은 ROS에서 보내는 모터 속도의 초당 최대 변화량이다.
+좌우 속도를 같은 보간 비율로 갱신하여 출발, 회전 방향 전환, 회전 후 직진을
+점진적으로 수행한다. 0→5 RPM은 통신 지연이 없다면 약 1초 걸린다.
+소수 RPM을 내부에 유지한 뒤 전송할 때만 정수로 반올림하므로, 장치의 1 RPM
+명령 해상도 자체는 바뀌지 않는다. 하드웨어 `acceleration_time_ms` 및
+`deceleration_time_ms` 설정은 별도로 유지된다.
+안전 해제, 명령 timeout, fault 정지는 ramp를 우회하며 다음 출발은 0부터 시작한다.
+자동 정렬과 수동 `/cmd_vel` 모두 실기 드라이버에서 적용된다. 실제 속도를
+피드백하는 제어기는 아니므로 마찰이나 좌우 모터 차이까지 보정하지는 않는다.
+가감속 지연이 추가되므로 최종 정렬 오차와 정지 거리는 실기에서 재확인해야 한다.
+
 ## 실행
 
 ```bash

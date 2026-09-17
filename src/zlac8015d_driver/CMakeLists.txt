@@ -32,4 +32,12 @@ install(TARGETS zlac8015d_modbus zlac8015d_driver_node wheel_odometry_node imu_d
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 
+if(BUILD_TESTING)
+  enable_testing()
+  add_executable(test_rpm_ramp test/test_rpm_ramp.cpp)
+  target_include_directories(test_rpm_ramp PRIVATE include)
+  target_compile_options(test_rpm_ramp PRIVATE -UNDEBUG)
+  add_test(NAME rpm_ramp COMMAND test_rpm_ramp)
+endif()
+
 ament_package()

@@ -16,6 +16,9 @@ zlac8015d_driver:
     right_motor_inverted: false
     # ZLAC8015D 레지스터 한계는 3000 RPM이지만, 장착 모터의 안전 한계를 입력한다.
     max_motor_rpm: 10.0
+    # ROS 명령 가감속: 초당 모터 RPM 변화량. 작을수록 천천히 출발/회전한다.
+    # 좌우 동시 적용, 안전 정지/timeout은 ramp 없이 즉시 0 명령.
+    motor_ramp_rpm_per_sec: 5.0
     acceleration_time_ms: 200
     deceleration_time_ms: 200
 

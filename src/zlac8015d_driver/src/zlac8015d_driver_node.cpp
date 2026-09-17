@@ -19,6 +19,7 @@
 #include "std_srvs/srv/trigger.hpp"
 
 #include "zlac8015d_driver/modbus_interface.hpp"
+#include "zlac8015d_driver/rpm_ramp.hpp"
 
 namespace
 {
@@ -80,6 +81,7 @@ public:
     left_motor_inverted_ = declare_parameter<bool>("left_motor_inverted", false);
     right_motor_inverted_ = declare_parameter<bool>("right_motor_inverted", false);
     max_motor_rpm_ = declare_parameter<double>("max_motor_rpm", 300.0);
+    motor_ramp_rpm_per_sec_ = declare_parameter<double>("motor_ramp_rpm_per_sec", 5.0);
     acceleration_time_ms_ = declare_parameter<int>("acceleration_time_ms", 500);
     deceleration_time_ms_ = declare_parameter<int>("deceleration_time_ms", 500);
     command_timeout_sec_ = declare_parameter<double>("command_timeout_sec", 0.5);
@@ -135,7 +137,8 @@ private:
   {
     if (driver_id_ < 0 || driver_id_ > 127 || serial_timeout_ms_ <= 0 ||
       max_communication_failures_ <= 0 || gear_ratio_ <= 0.0 || max_motor_rpm_ <= 0.0 ||
-      max_motor_rpm_ > kControllerRpmLimit || acceleration_time_ms_ < 0 ||
+      max_motor_rpm_ > kControllerRpmLimit || !std::isfinite(motor_ramp_rpm_per_sec_) ||
+      motor_ramp_rpm_per_sec_ <= 0.0 || acceleration_time_ms_ < 0 ||
       acceleration_time_ms_ > 32767 || deceleration_time_ms_ < 0 || deceleration_time_ms_ > 32767 ||
       command_timeout_sec_ <= 0.0 || fault_poll_rate_hz_ <= 0.0 || reconnect_interval_sec_ <= 0.0 ||
       safety_enable_timeout_sec_ <= 0.0 ||
@@ -175,6 +178,7 @@ private:
 
   bool initialize_driver()
   {
+    rpm_ramp_.reset();
     std::string error;
     if (!modbus_.connect(serial_port_, baudrate_, 'N', 8, 1, driver_id_, serial_timeout_ms_, error)) {
       report_communication_failure(error);
@@ -214,6 +218,11 @@ private:
 
   void control_step()
   {
+    // Use monotonic time. A delayed communication cycle must not cause a large
+    // catch-up jump in speed; the nominal control period is 50 ms.
+    const auto tick = std::chrono::steady_clock::now();
+    const double dt = std::clamp(std::chrono::duration<double>(tick - ramp_tick_).count(), 0.0, 0.05);
+    ramp_tick_ = tick;
     if (!modbus_.connected()) {
       if ((now() - last_reconnect_time_).seconds() >= reconnect_interval_sec_) {
         last_reconnect_time_ = now();
@@ -255,6 +264,7 @@ private:
     }
     const bool timed_out = !command_received_ || (now() - last_command_time_).seconds() > command_timeout_sec_;
     if (timed_out) {
+      rpm_ramp_.reset();  // Safety stops bypass the normal deceleration ramp.
       if (state_ != DriverState::COMMAND_TIMEOUT) {
         RCLCPP_WARN(get_logger(), "wheel command timeout: 0 RPM을 전송합니다");
       }
@@ -262,20 +272,28 @@ private:
       write_target_rpm(0, 0);
     } else {
       state_ = DriverState::READY;
-      write_target_rpm(to_motor_rpm(left_wheel_rad_s_, left_motor_inverted_),
-        to_motor_rpm(right_wheel_rad_s_, right_motor_inverted_));
+      const double left = to_motor_rpm(left_wheel_rad_s_, left_motor_inverted_);
+      const double right = to_motor_rpm(right_wheel_rad_s_, right_motor_inverted_);
+      if (!std::isfinite(left) || !std::isfinite(right)) {
+        disable_motor();
+        publish_state();
+        return;
+      }
+      rpm_ramp_.step(left, right, motor_ramp_rpm_per_sec_, dt);
+      write_target_rpm(static_cast<int16_t>(std::lround(rpm_ramp_.left)),
+        static_cast<int16_t>(std::lround(rpm_ramp_.right)));
     }
     publish_state();
   }
 
-  int16_t to_motor_rpm(const double wheel_rad_s, const bool inverted) const
+  double to_motor_rpm(const double wheel_rad_s, const bool inverted) const
   {
     double rpm = wheel_rad_s * kRadPerSecondToRpm * gear_ratio_;
     if (inverted) {
       rpm = -rpm;
     }
     rpm = std::clamp(rpm, -max_motor_rpm_, max_motor_rpm_);
-    return static_cast<int16_t>(std::lround(rpm));
+    return rpm;
   }
 
   bool write_target_rpm(const int16_t left_rpm, const int16_t right_rpm)
@@ -309,6 +327,7 @@ private:
 
   bool disable_motor()
   {
+    rpm_ramp_.reset();
     // 사용자가 확인한 ZLAC 0x07: 목표 속도 0 및 토크 해제 Stop.
     const bool stopped = write_target_rpm(0, 0) && write_control(kControlStop);
     motor_enabled_ = false;
@@ -318,6 +337,7 @@ private:
 
   bool enable_motor()
   {
+    rpm_ramp_.reset();
     // 안전 입력이 복구된 뒤에만 다시 Enable한다. 이전 비영 속도는 복원하지 않는다.
     if (!write_target_rpm(0, 0) || !write_control(kControlEnable)) {return false;}
     motor_enabled_ = true;
@@ -465,6 +485,9 @@ private:
   int baudrate_{}, driver_id_{}, serial_timeout_ms_{}, max_communication_failures_{};
   double gear_ratio_{}, max_motor_rpm_{}, command_timeout_sec_{}, fault_poll_rate_hz_{}, reconnect_interval_sec_{}, safety_enable_timeout_sec_{};
   double encoder_counts_per_rev_{};
+  double motor_ramp_rpm_per_sec_{};
+  zlac8015d_driver::RpmRamp rpm_ramp_;
+  std::chrono::steady_clock::time_point ramp_tick_{std::chrono::steady_clock::now()};
   bool left_motor_inverted_{}, right_motor_inverted_{};
   int left_encoder_sign_{}, right_encoder_sign_{};
   int acceleration_time_ms_{}, deceleration_time_ms_{};
