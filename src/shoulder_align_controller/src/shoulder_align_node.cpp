@@ -104,6 +104,9 @@ public:
     aligned_publisher_ = create_publisher<std_msgs::msg::Bool>("/alignment/aligned", 10);
     drive_enabled_publisher_ = create_publisher<std_msgs::msg::Bool>("/alignment/drive_enabled", 10);
     state_publisher_ = create_publisher<std_msgs::msg::String>("/shoulder_align/state", 10);
+    // Reliable, volatile event: do not replay an old start to a restarted receiver.
+    motor_start_publisher_ = create_publisher<std_msgs::msg::Bool>(
+      "/motor_start", rclcpp::QoS(1).reliable().durability_volatile());
     timer_ = create_wall_timer(50ms, [this] { control_step(); });
   }
 
@@ -253,7 +256,8 @@ private:
 
   void control_step()
   {
-    if (state_ == State::COMPLETE || state_ == State::ABORTED) {
+    if (state_ == State::COMPLETE) { complete_step(); return; }
+    if (state_ == State::ABORTED) {
       publish_stop(false);
       return;
     }
@@ -271,6 +275,28 @@ private:
     }
     if (state_ == State::CAPTURE) { capture_step(); return; }
     drive_step();
+    if (state_ == State::COMPLETE) { complete_step(); }
+  }
+
+  void complete_step()
+  {
+    // Keep publishing stop while DDS discovers the waiting receiver and for
+    // three seconds after the one-shot event. No sleep blocks the executor.
+    publish_stop(false);
+    if (!motor_start_sent_at_) {
+      if (motor_start_publisher_->get_subscription_count() == 0) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 3000,
+          "COMPLETE: waiting for /motor_start subscriber before publishing");
+        return;
+      }
+      motor_start_publisher_->publish(std_msgs::msg::Bool().set__data(true));
+      motor_start_sent_at_ = std::chrono::steady_clock::now();
+      RCLCPP_INFO(get_logger(), "COMPLETE: /motor_start=true published once; exiting in 3 seconds");
+    } else if (std::chrono::steady_clock::now() - *motor_start_sent_at_ >= 3s) {
+      timer_->cancel();
+      RCLCPP_INFO(get_logger(), "Shoulder alignment controller finished normally");
+      rclcpp::shutdown();
+    }
   }
 
   void capture_step()
@@ -450,11 +476,13 @@ private:
   bool stopped_confirmed_{false};
   double advance_speed_mps_{0.0};
   std::chrono::steady_clock::time_point advance_tick_{};
+  std::optional<std::chrono::steady_clock::time_point> motor_start_sent_at_;
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr shoulder_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr angle_error_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr aligned_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr motor_start_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr drive_enabled_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -464,6 +492,6 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<ShoulderAlignNode>());
-  rclcpp::shutdown();
+  if (rclcpp::ok()) { rclcpp::shutdown(); }
   return 0;
 }

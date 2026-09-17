@@ -43,6 +43,16 @@ stops in ABORTED, requiring restart instead of automatically repeating travel.
 These thresholds are initial settings; real wheel asymmetry, stopping distance
 and residual lateral error still need physical verification.
 
+On COMPLETE, the controller keeps publishing stop and waits for a matched
+`/motor_start` subscriber. It publishes `std_msgs/msg/Bool {data: true}` exactly
+once per node run, then keeps spinning and publishing stop for three wall-clock
+seconds before shutting down this controller process normally. Other launch
+processes remain running. With no subscriber it remains stopped and waiting;
+ABORTED never sends the event. The publisher uses reliable, volatile QoS: start
+the receiving code beforehand with compatible QoS and the same ROS domain.
+This is a one-shot notification, not an application-level acknowledgement or
+an exactly-once execution guarantee across process restarts.
+
 `camera_elevation_from_down_rad=1.0472` means 60 degrees above vertically down,
 equivalently 30 degrees below horizontal. It replaces the ambiguous shared
 `camera_pitch_down_rad` key. ROS positive Ry points a forward ray downward;
