@@ -21,6 +21,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
 #include "std_msgs/msg/string.hpp"
 
 using namespace std::chrono_literals;
@@ -107,11 +108,14 @@ public:
     // Reliable, volatile event: do not replay an old start to a restarted receiver.
     motor_start_publisher_ = create_publisher<std_msgs::msg::Bool>(
       "/motor_start", rclcpp::QoS(1).reliable().durability_volatile());
+    wheel_speeds_publisher_ = create_publisher<std_msgs::msg::Float32MultiArray>(
+      "/wheel_speeds", rclcpp::QoS(1).reliable().durability_volatile());
     timer_ = create_wall_timer(50ms, [this] { control_step(); });
   }
 
 private:
-  enum class State { CAPTURE, DRIVE, FINAL_HEADING, HOLD, POST_HOLD_ADVANCE, COMPLETE, ABORTED };
+  enum class State { CAPTURE, DRIVE, FINAL_HEADING, HOLD, POST_HOLD_ADVANCE,
+    COMPLETE, REVERSE_WAIT, REVERSE, FINAL_STOP, ABORTED };
 
   void on_landmarks(const geometry_msgs::msg::PoseArray & message)
   {
@@ -256,6 +260,8 @@ private:
 
   void control_step()
   {
+    if (state_ == State::REVERSE_WAIT || state_ == State::REVERSE ||
+      state_ == State::FINAL_STOP) { reverse_step(); return; }
     if (state_ == State::COMPLETE) { complete_step(); return; }
     if (state_ == State::ABORTED) {
       publish_stop(false);
@@ -280,8 +286,7 @@ private:
 
   void complete_step()
   {
-    // Keep publishing stop while DDS discovers the waiting receiver and for
-    // three seconds after the one-shot event. No sleep blocks the executor.
+    // Preserve the existing external motor start, then begin the final retreat.
     publish_stop(false);
     if (!motor_start_sent_at_) {
       if (motor_start_publisher_->get_subscription_count() == 0) {
@@ -291,12 +296,82 @@ private:
       }
       motor_start_publisher_->publish(std_msgs::msg::Bool().set__data(true));
       motor_start_sent_at_ = std::chrono::steady_clock::now();
-      RCLCPP_INFO(get_logger(), "COMPLETE: /motor_start=true published once; exiting in 3 seconds");
-    } else if (std::chrono::steady_clock::now() - *motor_start_sent_at_ >= 3s) {
-      timer_->cancel();
-      RCLCPP_INFO(get_logger(), "Shoulder alignment controller finished normally");
-      rclcpp::shutdown();
+      std_msgs::msg::Float32MultiArray speeds;
+      speeds.data = {20.0F, -20.0F};
+      wheel_speeds_publisher_->publish(speeds);
+      state_ = State::REVERSE_WAIT;
+      RCLCPP_INFO(get_logger(),
+        "Published /motor_start=true and /wheel_speeds=[50,-50] once; retreat in 3 seconds");
     }
+  }
+
+  void reverse_step()
+  {
+    const auto tick = std::chrono::steady_clock::now();
+    if (state_ == State::FINAL_STOP) {
+      // Repeated stop/disable messages allow downstream nodes to process the stop
+      // before this controller exits. Other launch processes remain running.
+      publish_stop(false);
+      if (tick - reverse_stop_at_ >= 1s) {
+        timer_->cancel();
+        RCLCPP_INFO(get_logger(), "Retreat complete; alignment controller exiting");
+        rclcpp::shutdown();
+      }
+      return;
+    }
+    if (!odom_is_fresh()) {
+      state_ = State::ABORTED;
+      publish_stop(false);
+      RCLCPP_ERROR(get_logger(), "Retreat aborted: odometry lost; restart required");
+      return;
+    }
+    if (state_ == State::REVERSE_WAIT) {
+      publish_stop(false);
+      if (tick - *motor_start_sent_at_ < 3s) { return; }
+      reverse_start_ = robot_->position;
+      reverse_heading_rad_ = robot_->yaw_rad;
+      reverse_frame_ = robot_->frame_id;
+      reverse_started_at_ = reverse_progress_at_ = advance_tick_ = tick;
+      reverse_progress_m_ = 0.0;
+      advance_speed_mps_ = 0.0;
+      state_ = State::REVERSE;
+      RCLCPP_INFO(get_logger(), "Retreat started: 1.0 m, maximum 0.05 m/s");
+    }
+    const double distance = -dot(
+      {robot_->position.x - reverse_start_.x, robot_->position.y - reverse_start_.y},
+      {std::cos(reverse_heading_rad_), std::sin(reverse_heading_rad_)});
+    const double yaw_error = normalize_angle(reverse_heading_rad_ - robot_->yaw_rad);
+    if (robot_->frame_id != reverse_frame_ || std::abs(yaw_error) > 0.35 || distance < -0.10) {
+      state_ = State::ABORTED;
+      publish_stop(false);
+      RCLCPP_ERROR(get_logger(), "Retreat aborted: frame, heading or travel direction invalid");
+      return;
+    }
+    if (distance >= 1.0) {
+      state_ = State::FINAL_STOP;
+      reverse_stop_at_ = tick;
+      publish_stop(false);
+      RCLCPP_INFO(get_logger(), "Retreat reached %.3f m; stopping", distance);
+      return;
+    }
+    if (distance >= reverse_progress_m_ + 0.01) {
+      reverse_progress_m_ = distance;
+      reverse_progress_at_ = tick;
+    }
+    if (tick - reverse_progress_at_ >= 3s || tick - reverse_started_at_ >= 60s) {
+      state_ = State::ABORTED;
+      publish_stop(false);
+      RCLCPP_ERROR(get_logger(), "Retreat aborted: no progress for 3 s or 60 s time limit; restart required");
+      return;
+    }
+    const double dt = std::clamp(std::chrono::duration<double>(tick - advance_tick_).count(), 0.0, 0.05);
+    advance_tick_ = tick;
+    advance_speed_mps_ = advance_math::speed(advance_speed_mps_, dt, max_speed_mps_);
+    const double angular = std::clamp(
+      advance_math::yaw_command(reverse_heading_rad_, robot_->yaw_rad, heading_kp_),
+      -max_yaw_rate_rad_s_, max_yaw_rate_rad_s_);
+    publish_velocity(-advance_speed_mps_, angular, true, yaw_error);
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Retreat: %.3f/1.000 m", distance);
   }
 
   void capture_step()
@@ -420,6 +495,9 @@ private:
       case State::HOLD: return "HOLD";
       case State::POST_HOLD_ADVANCE: return "POST_HOLD_ADVANCE";
       case State::COMPLETE: return "COMPLETE";
+      case State::REVERSE_WAIT: return "REVERSE_WAIT";
+      case State::REVERSE: return "REVERSE";
+      case State::FINAL_STOP: return "FINAL_STOP";
       case State::ABORTED: return "ABORTED";
     }
     return "UNKNOWN";
@@ -477,12 +555,17 @@ private:
   double advance_speed_mps_{0.0};
   std::chrono::steady_clock::time_point advance_tick_{};
   std::optional<std::chrono::steady_clock::time_point> motor_start_sent_at_;
+  Vec2 reverse_start_{};
+  double reverse_heading_rad_{}, reverse_progress_m_{};
+  std::string reverse_frame_;
+  std::chrono::steady_clock::time_point reverse_started_at_{}, reverse_progress_at_{}, reverse_stop_at_{};
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr shoulder_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr angle_error_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr aligned_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr motor_start_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr wheel_speeds_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr drive_enabled_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
