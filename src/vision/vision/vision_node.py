@@ -141,8 +141,8 @@ class RealSensePoseNode(Node):
                 cv2.putText(view, text, (text_x, text_y + 17 * line_index),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
         cv2.putText(view, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.imshow(f"D435 {self.pose_backend} pose measurement (q to close)", view)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+#         cv2.imshow(f"D435 {self.pose_backend} pose measurement (q to close)", view)
+        if False:
             self.close_requested = True
 
     def process_frame(self) -> None:
